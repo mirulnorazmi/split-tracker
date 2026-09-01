@@ -107,29 +107,25 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      # Set Kubernetes Context using kubeconfig from Rancher / cluster
-      - name: Set Kubernetes Context
-        uses: azure/k8s-set-context@v4
-        with:
-          method: kubeconfig
-          kubeconfig: ${{ secrets.KUBECONFIG }}
-
-      # Configure kubectl to trust self-signed / internal Rancher server certificates
-      - name: Configure TLS for Self-Signed Rancher Server
+      # Set up Kubeconfig directly and activate the 'local' cluster context
+      - name: Configure Kubeconfig
         run: |
-          CURRENT_CLUSTER=$(kubectl config view -o jsonpath='{.contexts[?(@.name=="'$(kubectl config current-context)'")].context.cluster}')
-          if [ -n "$CURRENT_CLUSTER" ]; then
-            kubectl config set-cluster "$CURRENT_CLUSTER" --insecure-skip-tls-verify=true
-          fi
+          mkdir -p ~/.kube
+          echo "${{ secrets.KUBECONFIG }}" > ~/.kube/config
+          chmod 600 ~/.kube/config
+          # Force active context to 'local' (Kubernetes API endpoint)
+          kubectl config use-context local
+          # Verify connection to Kubernetes API
+          kubectl version --short || kubectl version
 
       # Apply Kustomize production overlay to the 'og' namespace
       - name: Apply Kustomize Manifests
         run: |
-          kubectl apply -k k8s/overlays/production --validate=false --insecure-skip-tls-verify=true
+          kubectl apply -k k8s/overlays/production
 
       # Monitor rolling update in the 'og' namespace
       - name: Monitor Kubernetes Rollout Status
         run: |
           echo "Watching deployment rollout in 'og' namespace..."
-          kubectl rollout status deployment/splittrack --namespace=og --timeout=180s --insecure-skip-tls-verify=true
+          kubectl rollout status deployment/splittrack --namespace=og --timeout=180s
           echo "Deployment rollout in 'og' namespace completed successfully!"
