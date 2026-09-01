@@ -14,7 +14,7 @@ replicas:
 # Production image from your Harbor registry
 images:
   - name: splittrack
-    newName: harbor.smolelab.com/og/splittrack
+    newName: public-registry.smolelab.com/og/splittrack
     newTag: latest
 
 # Production ConfigMap overrides

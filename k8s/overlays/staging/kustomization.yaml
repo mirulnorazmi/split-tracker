@@ -14,7 +14,7 @@ replicas:
 # Staging image tag
 images:
   - name: splittrack
-    newName: harbor.smolelab.com/og/splittrack
+    newName: public-registry.smolelab.com/og/splittrack
     newTag: staging
 
 configMapGenerator:
