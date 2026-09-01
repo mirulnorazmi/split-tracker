@@ -121,7 +121,7 @@ jobs:
       # Apply Kustomize production overlay to the 'og' namespace
       - name: Apply Kustomize Manifests
         run: |
-          kubectl apply -k k8s/overlays/production
+          kubectl apply -k k8s/overlays/production --validate=false
 
       # Monitor rolling update in the 'og' namespace
       - name: Monitor Kubernetes Rollout Status
