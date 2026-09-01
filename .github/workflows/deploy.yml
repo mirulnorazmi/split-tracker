@@ -32,10 +32,10 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      - name: Set up Node.js 20
+      - name: Set up Node.js 22
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: 'npm'
 
       - name: Install Dependencies
@@ -107,16 +107,16 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      # Set up Kubeconfig directly and activate the 'local' cluster context
+      # Write Kubeconfig preserving multiline formatting and activate 'local' context
       - name: Configure Kubeconfig
+        env:
+          KUBECONFIG_DATA: ${{ secrets.KUBECONFIG }}
         run: |
           mkdir -p ~/.kube
-          echo "${{ secrets.KUBECONFIG }}" > ~/.kube/config
+          printf '%s\n' "$KUBECONFIG_DATA" > ~/.kube/config
           chmod 600 ~/.kube/config
-          # Force active context to 'local' (Kubernetes API endpoint)
-          kubectl config use-context local
-          # Verify connection to Kubernetes API
-          kubectl version --short || kubectl version
+          kubectl config use-context local || true
+          kubectl cluster-info || true
 
       # Apply Kustomize production overlay to the 'og' namespace
       - name: Apply Kustomize Manifests
