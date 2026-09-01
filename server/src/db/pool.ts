@@ -3,12 +3,28 @@ import { config } from '../config.js';
 
 const { Pool } = pg;
 
-const pool = new Pool({
-  connectionString: config.database.url,
+// Discrete configuration avoids URL-encoding bugs with special characters in passwords (like '+', '%', '@')
+const poolConfig: pg.PoolConfig = {
   max: 20,
   idleTimeoutMillis: 30000,
-  connectionTimeoutMillis: 10000,
-});
+  connectionTimeoutMillis: 15000,
+};
+
+if (process.env.DATABASE_URL) {
+  poolConfig.connectionString = process.env.DATABASE_URL;
+} else {
+  poolConfig.host = config.database.host;
+  poolConfig.port = config.database.port;
+  poolConfig.user = config.database.user;
+  poolConfig.password = config.database.password;
+  poolConfig.database = config.database.name;
+}
+
+if (process.env.DATABASE_SSL === 'true') {
+  poolConfig.ssl = { rejectUnauthorized: false };
+}
+
+const pool = new Pool(poolConfig);
 
 pool.on('error', (err) => {
   console.error('[DB] Unexpected pool error:', err.message);
@@ -22,12 +38,25 @@ export async function getClient(): Promise<pg.PoolClient> {
 }
 
 /**
- * Execute a single query with parameterised values.
+ * Execute a single query with parameterised values and automatic retry for initial startup connections.
  */
 export async function query<T extends pg.QueryResultRow = any>(
   text: string,
   params?: any[]
 ): Promise<pg.QueryResult<T>> {
+  let retries = 3;
+  while (retries > 0) {
+    try {
+      return await pool.query<T>(text, params);
+    } catch (err: any) {
+      retries--;
+      if (retries === 0 || !err.message?.includes('Connection')) {
+        throw err;
+      }
+      console.warn(`[DB] Query failed (${err.message}). Retrying in 2s... (${retries} attempts left)`);
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+    }
+  }
   return pool.query<T>(text, params);
 }
 

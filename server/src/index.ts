@@ -116,6 +116,8 @@ export async function buildServer() {
 }
 
 async function start() {
+  console.log(`[server] Initializing PostgreSQL connection to ${config.database.host}:${config.database.port}/${config.database.name}...`);
+
   // Run migrations on startup
   try {
     await runMigrations();
