@@ -1,0 +1,243 @@
+/**
+ * SplitTrack API Client
+ *
+ * Thin fetch-based wrapper around the Fastify REST API.
+ * Handles JWT token injection, JSON parsing, and error normalisation.
+ */
+
+const isViteDev = typeof window !== 'undefined' && window.location.port === '3000';
+const API_BASE = import.meta.env.VITE_API_URL || (isViteDev ? 'http://localhost:3001' : '');
+
+class ApiError extends Error {
+  status: number;
+  body: any;
+
+  constructor(status: number, body: any) {
+    super(body?.message || body?.error || `Request failed with status ${status}`);
+    this.name = 'ApiError';
+    this.status = status;
+    this.body = body;
+  }
+}
+
+function getToken(): string | null {
+  return localStorage.getItem('splittrack_token');
+}
+
+export function setToken(token: string): void {
+  localStorage.setItem('splittrack_token', token);
+}
+
+export function clearToken(): void {
+  localStorage.removeItem('splittrack_token');
+}
+
+async function request<T = any>(
+  method: string,
+  path: string,
+  body?: any,
+  options?: { isFormData?: boolean }
+): Promise<T> {
+  const headers: Record<string, string> = {};
+  const token = getToken();
+
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+
+  let reqBody: BodyInit | undefined;
+
+  if (body) {
+    if (options?.isFormData) {
+      reqBody = body as FormData;
+    } else {
+      headers['Content-Type'] = 'application/json';
+      reqBody = JSON.stringify(body);
+    }
+  }
+
+  const res = await fetch(`${API_BASE}${path}`, {
+    method,
+    headers,
+    body: reqBody,
+  });
+
+  const contentType = res.headers.get('content-type') || '';
+  const data = contentType.includes('application/json') ? await res.json() : await res.text();
+
+  if (!res.ok) {
+    throw new ApiError(res.status, data);
+  }
+
+  return data as T;
+}
+
+// ─── Auth ────────────────────────────────────────────────────────────────────
+
+export interface User {
+  id: string;
+  name: string;
+  email: string;
+  status: string;
+  role: string;
+  initials: string;
+  avatar?: string | null;
+  created_at?: string;
+}
+
+export interface LoginResponse {
+  token: string;
+  user: User;
+  message?: string;
+}
+
+export interface RegisterResponse {
+  user: User;
+  token?: string;
+  message?: string;
+}
+
+export const api = {
+  // Auth
+  register: (data: { name: string; email: string; password: string }) =>
+    request<RegisterResponse>('POST', '/auth/register', data),
+
+  login: (data: { email: string; password: string }) =>
+    request<LoginResponse>('POST', '/auth/login', data),
+
+  logout: () =>
+    request<{ message: string }>('POST', '/auth/logout').catch(() => ({ message: 'Logged out' })),
+
+  getMe: () => request<User>('GET', '/me'),
+
+  changePassword: (data: { oldPassword: string; newPassword: string }) =>
+    request<{ message: string }>('POST', '/auth/change-password', data),
+
+  // Users (admin)
+  listUsers: (params?: { status?: string; role?: string }) => {
+    const qs = new URLSearchParams();
+    if (params?.status) qs.set('status', params.status);
+    if (params?.role) qs.set('role', params.role);
+    const query = qs.toString();
+    return request<User[]>('GET', `/users${query ? `?${query}` : ''}`);
+  },
+
+  approveUser: (id: string) => request<{ id: string; status: string; message: string }>('PATCH', `/users/${id}/approve`),
+
+  updateUserRole: (id: string, role: string) =>
+    request<{ id: string; role: string; message: string }>('PATCH', `/users/${id}/role`, { role }),
+
+  resetUserPassword: (id: string) =>
+    request<{ message: string }>('POST', `/users/${id}/password-reset`),
+
+  // Categories
+  listCategories: () => request<Category[]>('GET', '/categories'),
+
+  // Expenses
+  createExpense: (data: {
+    title: string;
+    totalAmount: number;
+    categoryId: string;
+    participants: { userId: string; amountOwed: number }[];
+  }) => request<Expense>('POST', '/expenses', data),
+
+  listExpenses: (params?: { status?: string; creatorId?: string }) => {
+    const qs = new URLSearchParams();
+    if (params?.status) qs.set('status', params.status);
+    if (params?.creatorId) qs.set('creatorId', params.creatorId);
+    const query = qs.toString();
+    return request<Expense[]>('GET', `/expenses${query ? `?${query}` : ''}`);
+  },
+
+  getExpense: (id: string) => request<Expense>('GET', `/expenses/${id}`),
+
+  updateExpense: (
+    id: string,
+    data: {
+      title?: string;
+      totalAmount?: number;
+      categoryId?: string;
+      participants?: { userId: string; amountOwed: number }[];
+    }
+  ) => request<Expense>('PUT', `/expenses/${id}`, data),
+
+  updateExpenseStatus: (id: string, status: string) =>
+    request<{ id: string; status: string; message: string }>('PATCH', `/expenses/${id}/status`, { status }),
+
+  // Payments
+  createPayment: (data: {
+    amount: number;
+    payeeId: string;
+    expensesApplied: { expenseId: string; amountApplied: number }[];
+  }) => request<Payment>('POST', '/payments', data),
+
+  listPayments: (params?: { status?: string; payerId?: string; payeeId?: string; expenseId?: string }) => {
+    const qs = new URLSearchParams();
+    if (params?.status) qs.set('status', params.status);
+    if (params?.payerId) qs.set('payerId', params.payerId);
+    if (params?.payeeId) qs.set('payeeId', params.payeeId);
+    if (params?.expenseId) qs.set('expenseId', params.expenseId);
+    const query = qs.toString();
+    return request<Payment[]>('GET', `/payments${query ? `?${query}` : ''}`);
+  },
+
+  updatePaymentStatus: (id: string, status: string) =>
+    request<{ id: string; status: string; confirmedDate: string; message: string }>('PATCH', `/payments/${id}/status`, { status }),
+
+  // Dashboard
+  getDashboardStats: () =>
+    request<{ totalOwed: number; confirmedPayments: number; pendingPayments: number; currentBalance: number }>('GET', '/dashboard/stats'),
+
+  getDashboardRecent: () =>
+    request<{ recentExpenses: any[]; recentPayments: any[] }>('GET', '/dashboard/recent'),
+
+  // Avatar
+  uploadAvatar: (file: File) => {
+    const formData = new FormData();
+    formData.append('avatar', file);
+    return request<{ avatar: string; message: string }>('POST', '/users/avatar', formData, { isFormData: true });
+  },
+};
+
+// ─── Types ───────────────────────────────────────────────────────────────────
+
+export interface Category {
+  id: string;
+  name: string;
+  icon: string;
+  color: string;
+}
+
+export interface ExpenseParticipant {
+  userId: string;
+  amountOwed: number;
+}
+
+export interface Expense {
+  id: string;
+  title: string;
+  totalAmount: number;
+  date: string;
+  status: string;
+  categoryId: string;
+  creatorId: string;
+  categoryName?: string;
+  categoryIcon?: string;
+  categoryColor?: string;
+  participants: ExpenseParticipant[];
+}
+
+export interface Payment {
+  id: string;
+  date: string;
+  confirmedDate?: string | null;
+  amount: number;
+  payerId: string;
+  payeeId: string;
+  status: string;
+  payerName?: string;
+  payeeName?: string;
+  expensesApplied: { expenseId: string; amountApplied: number }[];
+}
+
+export { ApiError };

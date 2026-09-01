@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: splittrack-config
+  labels:
+    app.kubernetes.io/name: splittrack
+    app.kubernetes.io/component: web-api
+data:
+  NODE_ENV: "production"
+  PORT: "3001"
+  HOST: "0.0.0.0"
+  JWT_EXPIRES_IN: "7d"

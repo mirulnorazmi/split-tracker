@@ -1,0 +1,13 @@
+node_modules/
+build/
+dist/
+coverage/
+.DS_Store
+*.log
+.env*
+!.env.example
+.antigravity
+.qwen
+!.env.*.example
+!k8s/**/*.env.example
+k8s/overlays/**/*.env

@@ -1,0 +1,126 @@
+name: Build and Deploy to Harbor (Production)
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+    inputs:
+      target_env:
+        description: 'Deployment Environment'
+        required: true
+        default: 'production'
+        type: choice
+        options:
+          - production
+          - staging
+
+permissions:
+  contents: read
+
+jobs:
+  # ============================================================================
+  # 1. CI Stage: Validate Types and Frontend Build
+  # ============================================================================
+  validate:
+    name: Lint & Build Validation
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Bun / Node.js
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install Dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Run TypeScript Type Check
+        run: bun run lint
+
+      - name: Verify Frontend Compilation
+        run: bun run build
+
+  # ============================================================================
+  # 2. CD Stage: Build & Push Docker Image to Harbor Registry
+  # ============================================================================
+  build-and-push:
+    name: Build & Push to Harbor
+    needs: validate
+    runs-on: ubuntu-latest
+    environment: production
+    outputs:
+      image_tag: ${{ steps.meta.outputs.version }}
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # Supports values from either Variables or Secrets
+      - name: Log in to Harbor Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ vars.HARBOR_HOST || secrets.HARBOR_HOST }}
+          username: ${{ vars.HARBOR_USERNAME || secrets.HARBOR_USERNAME }}
+          password: ${{ secrets.HARBOR_PASSWORD }}
+
+      - name: Extract Docker Metadata (Tags & Labels)
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ vars.HARBOR_HOST || secrets.HARBOR_HOST }}/${{ vars.HARBOR_PROJECT || secrets.HARBOR_PROJECT }}/splittrack
+          tags: |
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
+            type=sha,format=short
+            type=semver,pattern={{version}}
+
+      - name: Build and Push Docker Image to Harbor
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # ============================================================================
+  # 3. Deploy Stage: Apply Kubernetes Manifests & Verify Rollout in 'og' Namespace
+  # ============================================================================
+  deploy:
+    name: Deploy to Kubernetes
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    environment: production
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      # Set Kubernetes Context using kubeconfig from Rancher / cluster
+      - name: Set Kubernetes Context
+        uses: azure/k8s-set-context@v4
+        with:
+          method: kubeconfig
+          kubeconfig: ${{ secrets.KUBECONFIG }}
+
+      # Apply Kustomize production overlay to the 'og' namespace
+      - name: Apply Kustomize Manifests
+        run: |
+          kubectl apply -k k8s/overlays/production
+
+      # Monitor rolling update in the 'og' namespace
+      - name: Monitor Kubernetes Rollout Status
+        run: |
+          echo "Watching deployment rollout in 'og' namespace..."
+          kubectl rollout status deployment/splittrack --namespace=og --timeout=180s
+          echo "Deployment rollout in 'og' namespace completed successfully!"

@@ -1,0 +1,63 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: splittrack
+  labels:
+    app.kubernetes.io/name: splittrack
+    app.kubernetes.io/component: web-api
+spec:
+  replicas: 1
+  revisionHistoryLimit: 5
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: splittrack
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: splittrack
+        app.kubernetes.io/component: web-api
+    spec:
+      imagePullSecrets:
+        - name: harbor-registry
+      containers:
+        - name: splittrack
+          image: splittrack:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 3001
+              protocol: TCP
+          envFrom:
+            # 1. Non-sensitive config from ConfigMap
+            - configMapRef:
+                name: splittrack-config
+            # 2. Sensitive credentials from Secret
+            - secretRef:
+                name: splittrack-secret
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 2
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: false
+            runAsNonRoot: false

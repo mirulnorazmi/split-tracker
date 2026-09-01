@@ -1,0 +1,25 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: staging
+
+resources:
+  - ../../base
+
+# 1 replica for staging
+replicas:
+  - name: splittrack
+    count: 1
+
+# Staging image tag
+images:
+  - name: splittrack
+    newName: harbor.smolelab.com/og/splittrack
+    newTag: staging
+
+configMapGenerator:
+  - name: splittrack-config
+    behavior: merge
+    literals:
+      - NODE_ENV=staging
+      - APP_URL=https://staging.splittrack.smolelab.com
