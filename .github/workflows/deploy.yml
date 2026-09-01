@@ -95,7 +95,7 @@ jobs:
           cache-to: type=gha,mode=max
 
   # ============================================================================
-  # 3. Deploy Stage: Apply Kubernetes Manifests & Verify Rollout in 'og' Namespace
+  # 3. Deploy Stage: Apply Kubernetes Manifests & Verify Rollout in 'app' Namespace
   # ============================================================================
   deploy:
     name: Deploy to Kubernetes
@@ -126,19 +126,19 @@ jobs:
 
           kubectl get nodes
 
-      # Ensure target namespace 'og' exists
+      # Ensure target namespace 'app' exists
       - name: Ensure Namespace Exists
         run: |
-          kubectl create namespace og --dry-run=client -o yaml | kubectl apply -f -
+          kubectl create namespace app --dry-run=client -o yaml | kubectl apply -f -
 
-      # Apply Kustomize production overlay to the 'og' namespace
+      # Apply Kustomize production overlay to the 'app' namespace
       - name: Apply Kustomize Manifests
         run: |
           kubectl apply -k k8s/overlays/production --validate=false
 
-      # Monitor rolling update in the 'og' namespace
+      # Monitor rolling update in the 'app' namespace
       - name: Monitor Kubernetes Rollout Status
         run: |
-          echo "Watching deployment rollout in 'og' namespace..."
-          kubectl rollout status deployment/splittrack --namespace=og --timeout=180s
-          echo "Deployment rollout in 'og' namespace completed successfully!"
+          echo "Watching deployment rollout in 'app' namespace..."
+          kubectl rollout status deployment/splittrack --namespace=app --timeout=180s
+          echo "Deployment rollout in 'app' namespace completed successfully!"
