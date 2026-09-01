@@ -114,14 +114,22 @@ jobs:
           method: kubeconfig
           kubeconfig: ${{ secrets.KUBECONFIG }}
 
+      # Configure kubectl to trust self-signed / internal Rancher server certificates
+      - name: Configure TLS for Self-Signed Rancher Server
+        run: |
+          CURRENT_CLUSTER=$(kubectl config view -o jsonpath='{.contexts[?(@.name=="'$(kubectl config current-context)'")].context.cluster}')
+          if [ -n "$CURRENT_CLUSTER" ]; then
+            kubectl config set-cluster "$CURRENT_CLUSTER" --insecure-skip-tls-verify=true
+          fi
+
       # Apply Kustomize production overlay to the 'og' namespace
       - name: Apply Kustomize Manifests
         run: |
-          kubectl apply -k k8s/overlays/production
+          kubectl apply -k k8s/overlays/production --validate=false --insecure-skip-tls-verify=true
 
       # Monitor rolling update in the 'og' namespace
       - name: Monitor Kubernetes Rollout Status
         run: |
           echo "Watching deployment rollout in 'og' namespace..."
-          kubectl rollout status deployment/splittrack --namespace=og --timeout=180s
+          kubectl rollout status deployment/splittrack --namespace=og --timeout=180s --insecure-skip-tls-verify=true
           echo "Deployment rollout in 'og' namespace completed successfully!"

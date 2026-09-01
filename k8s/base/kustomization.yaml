@@ -7,5 +7,6 @@ resources:
   - service.yaml
   - ingress.yaml
 
-commonLabels:
-  app.kubernetes.io/part-of: splittrack
+labels:
+  - pairs:
+      app.kubernetes.io/part-of: splittrack
