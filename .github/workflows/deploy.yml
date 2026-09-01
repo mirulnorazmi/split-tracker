@@ -22,7 +22,7 @@ permissions:
 
 jobs:
   # ============================================================================
-  # 1. CI Stage: Validate Types and Frontend Build
+  # 1. CI Stage: Validate Types and Frontend Build with Node.js & NPM
   # ============================================================================
   validate:
     name: Lint & Build Validation
@@ -32,19 +32,20 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      - name: Setup Bun / Node.js
-        uses: oven-sh/setup-bun@v2
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v4
         with:
-          bun-version: latest
+          node-version: 20
+          cache: 'npm'
 
       - name: Install Dependencies
-        run: bun install --frozen-lockfile
+        run: npm ci
 
       - name: Run TypeScript Type Check
-        run: bun run lint
+        run: npm run lint
 
       - name: Verify Frontend Compilation
-        run: bun run build
+        run: npm run build
 
   # ============================================================================
   # 2. CD Stage: Build & Push Docker Image to Harbor Registry
