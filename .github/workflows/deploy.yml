@@ -107,19 +107,23 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      # Write Kubeconfig and verify active cluster target
-      - name: Configure Kubeconfig
+      # Write Kubeconfig and verify cluster connection
+      - name: Configure Kubeconfig & Verify Connection
         env:
           KUBECONFIG_DATA: ${{ secrets.KUBECONFIG }}
         run: |
           mkdir -p ~/.kube
-          printf '%s\n' "$KUBECONFIG_DATA" > ~/.kube/config
+          cat <<'EOF' > ~/.kube/config
+          ${{ secrets.KUBECONFIG }}
+          EOF
           chmod 600 ~/.kube/config
-          # If local context exists, switch to it
-          kubectl config use-context local || true
-          echo "Target API Server:"
-          kubectl config view --minify -o jsonpath='{.clusters[0].cluster.server}'
-          echo ""
+          kubectl cluster-info
+          kubectl get nodes
+
+      # Ensure target namespace 'og' exists
+      - name: Ensure Namespace Exists
+        run: |
+          kubectl create namespace og --dry-run=client -o yaml | kubectl apply -f -
 
       # Apply Kustomize production overlay to the 'og' namespace
       - name: Apply Kustomize Manifests
