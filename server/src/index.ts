@@ -101,6 +101,7 @@ export async function buildServer() {
         url.startsWith('/payments') ||
         url.startsWith('/dashboard') ||
         url.startsWith('/health') ||
+        url.startsWith('/avatars') ||
         url.startsWith('/api');
 
       if (isApiRoute) {

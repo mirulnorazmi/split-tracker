@@ -12,7 +12,6 @@ const minioClient = new Client({
 });
 
 const BUCKET = config.minio.bucket;
-const PUBLIC_URL = config.minio.publicUrl;
 
 // Ensure bucket exists and has public read access on startup
 async function ensureBucket() {
@@ -42,7 +41,7 @@ async function ensureBucket() {
       await minioClient.setBucketPolicy(BUCKET, JSON.stringify(readOnlyPolicy));
       console.log(`[minio] Set public read policy for "${BUCKET}"`);
     } catch (policyErr) {
-      console.warn(`[minio] Could not set bucket policy automatically:`, (policyErr as Error).message);
+      console.warn(`[minio] Note: bucket policy:`, (policyErr as Error).message);
     }
   } catch (err) {
     console.warn(`[minio] Warning: Could not connect to object storage (${BUCKET}):`, (err as Error).message);
@@ -87,13 +86,15 @@ export default async function avatarRoutes(fastify: FastifyInstance) {
     const buffer = Buffer.concat(chunks);
     const ext = data.mimetype.split('/')[1] === 'jpeg' ? 'jpg' : data.mimetype.split('/')[1];
     const timestamp = Date.now();
-    const objectName = `avatars/${userId}_${timestamp}.${ext}`;
+    const fileName = `${userId}_${timestamp}.${ext}`;
+    const objectName = `avatars/${fileName}`;
 
     await minioClient.putObject(BUCKET, objectName, buffer, buffer.length, {
       'Content-Type': data.mimetype,
     });
 
-    const avatarUrl = `${PUBLIC_URL}/${objectName}`;
+    // Always route through the fastify /avatars proxy route so images load without CORS or external storage DNS issues
+    const avatarUrl = `/avatars/${fileName}`;
 
     await query(
       `UPDATE "user" SET avatar = $1, updated_at = NOW() WHERE id = $2`,
@@ -108,21 +109,28 @@ export default async function avatarRoutes(fastify: FastifyInstance) {
    * Public — stream avatar object from storage with cache headers
    */
   fastify.get('/avatars/*', async (request: FastifyRequest, reply: FastifyReply) => {
-    const objectPath = (request.params as Record<string, string>)['*'];
-    if (!objectPath) {
+    const rawPath = (request.params as Record<string, string>)['*'] || '';
+    if (!rawPath) {
       return reply.status(400).send({ error: 'Bad Request', message: 'Avatar path required' });
     }
 
-    try {
-      const fullObjectName = objectPath.startsWith('avatars/') ? objectPath : `avatars/${objectPath}`;
-      const stat = await minioClient.statObject(BUCKET, fullObjectName);
-      const stream = await minioClient.getObject(BUCKET, fullObjectName);
+    // Support both "avatars/filename.jpg" and "filename.jpg" and clean up any repeated prefixes
+    const cleanFileName = rawPath.replace(/^avatars\//, '').replace(/^avatars\//, '');
+    const candidateKeys = [`avatars/${cleanFileName}`, cleanFileName, rawPath];
 
-      reply.header('Content-Type', stat.metaData?.['content-type'] || 'image/jpeg');
-      reply.header('Cache-Control', 'public, max-age=86400');
-      return reply.send(stream);
-    } catch {
-      return reply.status(404).send({ error: 'Not Found', message: 'Avatar image not found' });
+    for (const key of candidateKeys) {
+      try {
+        const stat = await minioClient.statObject(BUCKET, key);
+        const stream = await minioClient.getObject(BUCKET, key);
+
+        reply.header('Content-Type', stat.metaData?.['content-type'] || 'image/jpeg');
+        reply.header('Cache-Control', 'public, max-age=86400');
+        return reply.send(stream);
+      } catch {
+        // Try next candidate key
+      }
     }
+
+    return reply.status(404).send({ error: 'Not Found', message: 'Avatar image not found' });
   });
 }

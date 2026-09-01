@@ -76,10 +76,16 @@ export default function Profile() {
         <div className="flex flex-col sm:flex-row gap-4 sm:gap-6 items-start">
           <div className="w-20 h-20 sm:w-24 sm:h-24 rounded-2xl bg-zinc-800 border border-zinc-700 flex items-center justify-center text-2xl sm:text-3xl font-bold text-white shrink-0 overflow-hidden">
             {user?.avatar ? (
-              <img src={user.avatar} alt={user.name} className="w-full h-full object-cover" />
-            ) : (
-              user?.initials || '?'
-            )}
+              <img
+                src={user.avatar}
+                alt={user.name}
+                className="w-full h-full object-cover"
+                onError={(e) => {
+                  e.currentTarget.style.display = 'none';
+                }}
+              />
+            ) : null}
+            {!user?.avatar && (user?.initials || '?')}
           </div>
           <div>
             <div className="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-2">Profile Picture</div>
