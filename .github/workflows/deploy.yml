@@ -107,17 +107,23 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      # Write Kubeconfig directly from env to prevent leading YAML indentation corruption
-      - name: Configure Kubeconfig & Verify Connection
+      # Write Kubeconfig directly from env
+      - name: Configure Kubeconfig & Diagnose Connection
         env:
           KUBECONFIG_DATA: ${{ secrets.KUBECONFIG }}
         run: |
           mkdir -p ~/.kube
           echo "$KUBECONFIG_DATA" > ~/.kube/config
           chmod 600 ~/.kube/config
-          echo "Active Kubernetes Server:"
-          kubectl config view --minify -o jsonpath='{.clusters[0].cluster.server}'
-          echo ""
+
+          SERVER_URL=$(kubectl config view --minify -o jsonpath='{.clusters[0].cluster.server}')
+          TOKEN=$(kubectl config view --minify --raw -o jsonpath='{.users[0].user.token}')
+          echo "Connecting to Server: $SERVER_URL"
+
+          echo "--- DIAGNOSTIC: Checking response from Rancher endpoint ---"
+          curl -k -i -s -H "Authorization: Bearer $TOKEN" "$SERVER_URL/api" | head -n 35
+          echo "--- END DIAGNOSTIC ---"
+
           kubectl get nodes
 
       # Ensure target namespace 'og' exists
