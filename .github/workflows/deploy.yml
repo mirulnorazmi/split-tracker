@@ -107,17 +107,17 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      # Write Kubeconfig and verify cluster connection
+      # Write Kubeconfig directly from env to prevent leading YAML indentation corruption
       - name: Configure Kubeconfig & Verify Connection
         env:
           KUBECONFIG_DATA: ${{ secrets.KUBECONFIG }}
         run: |
           mkdir -p ~/.kube
-          cat <<'EOF' > ~/.kube/config
-          ${{ secrets.KUBECONFIG }}
-          EOF
+          echo "$KUBECONFIG_DATA" > ~/.kube/config
           chmod 600 ~/.kube/config
-          kubectl cluster-info
+          echo "Active Kubernetes Server:"
+          kubectl config view --minify -o jsonpath='{.clusters[0].cluster.server}'
+          echo ""
           kubectl get nodes
 
       # Ensure target namespace 'og' exists
