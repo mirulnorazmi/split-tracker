@@ -44,6 +44,7 @@ async function request<T = any>(
   if (token) {
     headers['Authorization'] = `Bearer ${token}`;
   }
+  headers['Accept'] = 'application/json';
 
   let reqBody: BodyInit | undefined;
 

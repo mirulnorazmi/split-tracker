@@ -105,11 +105,43 @@ export async function buildServer() {
       wildcard: false, // Let custom notFoundHandler handle SPA client-side routes
     });
 
+    // Intercept browser page navigation for client-side routes (e.g. /expenses, /payments, /users, /dashboard)
+    // When a user refreshes or visits in a browser, the browser requests HTML.
+    // Fastify must serve index.html instead of executing the backend JSON route!
+    fastify.addHook('preHandler', async (req, reply) => {
+      if (req.method !== 'GET') return;
+
+      const url = req.raw.url?.split('?')[0] || '';
+      const accept = req.headers.accept || '';
+      const secFetchDest = req.headers['sec-fetch-dest'];
+
+      // Never intercept static assets, health probes, or avatar streaming
+      if (
+        url === '/health' ||
+        url.startsWith('/health') ||
+        url.startsWith('/avatars') ||
+        url.startsWith('/assets') ||
+        url.includes('.')
+      ) {
+        return;
+      }
+
+      // If browser is navigating to a page / refreshing in the browser
+      const isBrowserNavigation =
+        secFetchDest === 'document' ||
+        (accept.includes('text/html') && !accept.includes('application/json'));
+
+      if (isBrowserNavigation) {
+        return reply.sendFile('index.html');
+      }
+    });
+
     fastify.setNotFoundHandler(async (req, reply) => {
       const acceptHeader = req.headers.accept || '';
+      const secFetchDest = req.headers['sec-fetch-dest'];
 
       // If browser navigation / page refresh (client requests HTML), serve index.html for React Router
-      if (req.method === 'GET' && (acceptHeader.includes('text/html') || !acceptHeader.includes('application/json'))) {
+      if (req.method === 'GET' && (secFetchDest === 'document' || acceptHeader.includes('text/html') || !acceptHeader.includes('application/json'))) {
         return reply.sendFile('index.html');
       }
 
