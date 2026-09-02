@@ -136,6 +136,12 @@ jobs:
         run: |
           kubectl apply -k k8s/overlays/production --validate=false
 
+      # Force Kubernetes to pull the new image from Harbor and perform a rolling restart
+      - name: Trigger Rolling Restart
+        run: |
+          echo "Triggering rolling update to pull fresh image from Harbor..."
+          kubectl rollout restart deployment/splittrack --namespace=app
+
       # Monitor rolling update in the 'app' namespace
       - name: Monitor Kubernetes Rollout Status
         run: |
