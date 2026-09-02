@@ -23,7 +23,12 @@ const __dirname = path.dirname(__filename);
 
 export async function buildServer() {
   const fastify = Fastify({
-    logger: config.nodeEnv !== 'test',
+    logger:
+      config.nodeEnv === 'test'
+        ? false
+        : {
+            level: process.env.LOG_LEVEL || (config.nodeEnv === 'production' ? 'warn' : 'info'),
+          },
     trustProxy: true,
   });
 

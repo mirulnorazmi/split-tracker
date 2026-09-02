@@ -10,3 +10,4 @@ data:
   PORT: "3001"
   HOST: "0.0.0.0"
   JWT_EXPIRES_IN: "7d"
+  LOG_LEVEL: "warn"
