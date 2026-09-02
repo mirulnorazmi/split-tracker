@@ -106,26 +106,15 @@ export async function buildServer() {
     });
 
     fastify.setNotFoundHandler(async (req, reply) => {
-      const url = req.raw.url || '';
+      const acceptHeader = req.headers.accept || '';
 
-      // If request was intended for an API route, return 404 JSON
-      const isApiRoute =
-        url.startsWith('/auth') ||
-        url.startsWith('/users') ||
-        url.startsWith('/categories') ||
-        url.startsWith('/expenses') ||
-        url.startsWith('/payments') ||
-        url.startsWith('/dashboard') ||
-        url.startsWith('/health') ||
-        url.startsWith('/avatars') ||
-        url.startsWith('/api');
-
-      if (isApiRoute) {
-        return reply.status(404).send({ error: 'Not Found', message: 'API route not found' });
+      // If browser navigation / page refresh (client requests HTML), serve index.html for React Router
+      if (req.method === 'GET' && (acceptHeader.includes('text/html') || !acceptHeader.includes('application/json'))) {
+        return reply.sendFile('index.html');
       }
 
-      // Otherwise, serve React index.html for client-side routing
-      return reply.sendFile('index.html');
+      // Otherwise, if API / AJAX request, return 404 JSON
+      return reply.status(404).send({ error: 'Not Found', message: 'API route not found' });
     });
   }
 
