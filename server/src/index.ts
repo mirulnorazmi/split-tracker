@@ -22,21 +22,29 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 export async function buildServer() {
+  const isTest = config.nodeEnv === 'test';
+  // Default to 'warn' to silence routine INFO logs (200 OK, request completed), while preserving WARN (40), ERROR (50), FATAL (60)
+  const logLevel = process.env.LOG_LEVEL || (config.nodeEnv === 'development' ? 'info' : 'warn');
+
   const fastify = Fastify({
-    logger:
-      config.nodeEnv === 'test'
-        ? false
-        : {
-            level: process.env.LOG_LEVEL || (config.nodeEnv === 'production' ? 'warn' : 'info'),
+    logger: isTest
+      ? false
+      : {
+          level: logLevel,
+          base: {
+            env: config.nodeEnv,
           },
+        },
     trustProxy: true,
   });
 
-  // ── 1. Noise-Filter Hook: Silence log output for static assets ──────────────
-  // Prevents terminal and container logs from being flooded with .js, .css, .png requests
+  // ── 1. Silence probe & static asset noise ──────────────────────────────────
+  // Silences /health probes from Kubernetes and static file assets
   fastify.addHook('onRequest', async (req) => {
     const url = req.raw.url || '';
     if (
+      url === '/health' ||
+      url.startsWith('/health') ||
       url.startsWith('/assets') ||
       url.endsWith('.js') ||
       url.endsWith('.css') ||
@@ -75,8 +83,11 @@ export async function buildServer() {
   await fastify.register(dashboardRoutes);
   await fastify.register(avatarRoutes);
 
-  // ── 4. Health Check ───────────────────────────────────────────────────────
-  fastify.get('/health', async () => ({ status: 'ok', timestamp: new Date().toISOString() }));
+  // ── 4. Health Check (logLevel: 'silent' completely stops Kubernetes probe logs) ──
+  fastify.get('/health', { logLevel: 'silent' }, async () => ({
+    status: 'ok',
+    timestamp: new Date().toISOString(),
+  }));
 
   // ── 5. Static Assets & SPA Client-Side Routing ─────────────────────────────
   // Look for built frontend assets in dist/ directory (both local & container layout)
@@ -122,7 +133,13 @@ export async function buildServer() {
 }
 
 async function start() {
-  console.log(`[server] Initializing PostgreSQL connection to ${config.database.host}:${config.database.port}/${config.database.name}...`);
+  const logLevel = process.env.LOG_LEVEL || (config.nodeEnv === 'development' ? 'info' : 'warn');
+  console.log(`[server] ==========================================`);
+  console.log(`[server] App:          SplitTrack`);
+  console.log(`[server] Environment:  ${config.nodeEnv.toUpperCase()}`);
+  console.log(`[server] Log Level:    ${logLevel.toUpperCase()}`);
+  console.log(`[server] Database:     ${config.database.host}:${config.database.port}/${config.database.name}`);
+  console.log(`[server] ==========================================`);
 
   // Run migrations on startup
   try {
