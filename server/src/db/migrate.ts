@@ -44,3 +44,13 @@ export async function runMigrations(): Promise<void> {
 
   console.log('[migrate] All migrations applied.');
 }
+
+const isMainModule = process.argv[1]?.includes('migrate');
+if (isMainModule) {
+  runMigrations()
+    .then(() => process.exit(0))
+    .catch((err) => {
+      console.error('[migrate] Error:', err);
+      process.exit(1);
+    });
+}

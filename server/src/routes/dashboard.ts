@@ -9,12 +9,15 @@ export default async function dashboardRoutes(fastify: FastifyInstance) {
   fastify.get('/dashboard/stats', { preHandler: [fastify.authenticate] }, async (request: FastifyRequest, reply: FastifyReply) => {
     const { id: userId } = request.user as { id: string };
 
-    // Total owed by user (sum of their shares across all confirmed expenses)
+    // Total owed by user — excludes expenses where the user is the host/creator,
+    // because the host already paid the full bill upfront and their share is auto-waived.
     const { rows: [owedRow] } = await query(
       `SELECT COALESCE(SUM(ep.amount_owed), 0) AS "totalOwed"
        FROM expense_participant ep
        JOIN expense e ON e.id = ep.expense_id
-       WHERE ep.user_id = $1 AND e.status = 'Confirmed'`,
+       WHERE ep.user_id = $1
+         AND e.status = 'Confirmed'
+         AND e.creator_id != ep.user_id`,
       [userId]
     );
 
@@ -63,6 +66,7 @@ export default async function dashboardRoutes(fastify: FastifyInstance) {
        FROM expense e
        JOIN category c ON c.id = e.category_id
        JOIN expense_participant ep ON ep.expense_id = e.id AND ep.user_id = $1
+       WHERE (e.status = 'Confirmed' OR e.creator_id = $1)
        ORDER BY e.date DESC
        LIMIT 5`,
       [userId]

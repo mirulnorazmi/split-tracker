@@ -70,9 +70,17 @@ export default async function expenseRoutes(fastify: FastifyInstance) {
    * Authenticated — list expenses with optional filters
    */
   fastify.get('/expenses', { preHandler: [fastify.authenticate] }, async (request: FastifyRequest, reply: FastifyReply) => {
+    const { role, id: userId } = request.user as { role: string; id: string };
     const { status, creatorId } = request.query as { status?: string; creatorId?: string };
     const params: any[] = [];
     const conditions: string[] = [];
+
+    // Non-admins can only see Confirmed expenses, OR Pending expenses they personally created.
+    // They cannot see pending expenses created by other users until approved by Admin.
+    if (role !== 'Admin') {
+      params.push(userId);
+      conditions.push(`(e.status = 'Confirmed' OR e.creator_id = $${params.length})`);
+    }
 
     if (status) {
       params.push(status);
@@ -88,13 +96,15 @@ export default async function expenseRoutes(fastify: FastifyInstance) {
     const { rows } = await query(
       `SELECT e.id, e.title, e.total_amount AS "totalAmount", e.date, e.status,
               e.category_id AS "categoryId", e.creator_id AS "creatorId",
+              e.approved_by AS "approvedById", approver.name AS "approvedByName", e.approved_at AS "approvedAt",
               c.name AS "categoryName", c.icon AS "categoryIcon", c.color AS "categoryColor",
               COALESCE(json_agg(json_build_object('userId', ep.user_id, 'amountOwed', ep.amount_owed)) FILTER (WHERE ep.user_id IS NOT NULL), '[]') AS participants
        FROM expense e
        JOIN category c ON c.id = e.category_id
+       LEFT JOIN "user" approver ON approver.id = e.approved_by
        LEFT JOIN expense_participant ep ON ep.expense_id = e.id
        ${where}
-       GROUP BY e.id, c.id
+       GROUP BY e.id, c.id, approver.id
        ORDER BY e.date DESC`,
       params
     );
@@ -107,18 +117,21 @@ export default async function expenseRoutes(fastify: FastifyInstance) {
    * Authenticated — get expense details
    */
   fastify.get('/expenses/:id', { preHandler: [fastify.authenticate] }, async (request: FastifyRequest, reply: FastifyReply) => {
+    const { role, id: userId } = request.user as { role: string; id: string };
     const { id } = request.params as { id: string };
 
     const { rows } = await query(
       `SELECT e.id, e.title, e.total_amount AS "totalAmount", e.date, e.status,
               e.category_id AS "categoryId", e.creator_id AS "creatorId",
+              e.approved_by AS "approvedById", approver.name AS "approvedByName", e.approved_at AS "approvedAt",
               c.name AS "categoryName", c.icon AS "categoryIcon", c.color AS "categoryColor",
               COALESCE(json_agg(json_build_object('userId', ep.user_id, 'amountOwed', ep.amount_owed)) FILTER (WHERE ep.user_id IS NOT NULL), '[]') AS participants
        FROM expense e
        JOIN category c ON c.id = e.category_id
+       LEFT JOIN "user" approver ON approver.id = e.approved_by
        LEFT JOIN expense_participant ep ON ep.expense_id = e.id
        WHERE e.id = $1
-       GROUP BY e.id, c.id`,
+       GROUP BY e.id, c.id, approver.id`,
       [id]
     );
 
@@ -126,7 +139,14 @@ export default async function expenseRoutes(fastify: FastifyInstance) {
       return reply.status(404).send({ error: 'Not Found', message: 'Expense not found' });
     }
 
-    return reply.send(rows[0]);
+    const expense = rows[0];
+
+    // Non-admins cannot view pending expenses created by someone else
+    if (role !== 'Admin' && expense.status === 'Pending' && expense.creatorId !== userId) {
+      return reply.status(403).send({ error: 'Forbidden', message: 'This expense is pending administrator approval.' });
+    }
+
+    return reply.send(expense);
   });
 
   /**
@@ -200,34 +220,37 @@ export default async function expenseRoutes(fastify: FastifyInstance) {
       return reply.status(400).send({ error: 'Bad Request', message: 'status must be "Confirmed"' });
     }
 
-    // If not Admin, verify that user is the creator or a participant
+    // Only Admin can approve expenses
     if (role !== 'Admin') {
-      const { rows: expCheck } = await query(
-        `SELECT 1 FROM expense e
-         LEFT JOIN expense_participant ep ON ep.expense_id = e.id
-         WHERE e.id = $1 AND (e.creator_id = $2 OR ep.user_id = $2)`,
-        [id, userId]
-      );
-      if (expCheck.length === 0) {
-        return reply.status(403).send({ error: 'Forbidden', message: 'You do not have permission to approve this expense' });
-      }
+      return reply.status(403).send({ error: 'Forbidden', message: 'Only administrators can approve expenses' });
     }
 
     const { rows } = await query(
-      `UPDATE expense SET status = $1, updated_at = NOW() WHERE id = $2 AND status = 'Pending'
-       RETURNING id, status`,
-      [status, id]
+      `UPDATE expense
+       SET status = $1, approved_by = $2, approved_at = NOW(), updated_at = NOW()
+       WHERE id = $3 AND status = 'Pending'
+       RETURNING id, status, approved_by AS "approvedById", approved_at AS "approvedAt"`,
+      [status, userId, id]
     );
 
     if (rows.length === 0) {
-      const { rows: existing } = await query('SELECT id, status FROM expense WHERE id = $1', [id]);
+      const { rows: existing } = await query(
+        `SELECT e.id, e.status, e.approved_by AS "approvedById", approver.name AS "approvedByName", e.approved_at AS "approvedAt"
+         FROM expense e
+         LEFT JOIN "user" approver ON approver.id = e.approved_by
+         WHERE e.id = $1`,
+        [id]
+      );
       if (existing.length > 0) {
-        return reply.send({ id: existing[0].id, status: existing[0].status, message: 'Expense is already confirmed.' });
+        return reply.send({ ...existing[0], message: 'Expense is already confirmed.' });
       }
       return reply.status(404).send({ error: 'Not Found', message: 'Expense not found' });
     }
 
-    return reply.send({ ...rows[0], message: 'Expense status updated.' });
+    const { rows: approverRows } = await query('SELECT name FROM "user" WHERE id = $1', [userId]);
+    const approvedByName = approverRows[0]?.name || null;
+
+    return reply.send({ ...rows[0], approvedByName, message: 'Expense status updated.' });
   };
 
   fastify.patch('/expenses/:id/status', { preHandler: [fastify.authenticate] }, handleUpdateExpenseStatus);

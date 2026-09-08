@@ -66,6 +66,7 @@ export async function buildServer() {
   await fastify.register(cors, {
     origin: true,
     credentials: true,
+    methods: ['GET', 'HEAD', 'PUT', 'POST', 'DELETE', 'PATCH', 'OPTIONS'],
   });
 
   await fastify.register(multipart, {

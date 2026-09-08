@@ -119,7 +119,15 @@ export default function Payments() {
                         To {payeeName}
                       </span>
                     </div>
-                    <div className="text-xs text-zinc-500">Paid on {formatDate(payment.date)}</div>
+                    <div className="text-xs text-zinc-500 flex flex-wrap items-center gap-1.5">
+                      <span>Paid on {formatDate(payment.date)}</span>
+                      {payment.confirmedByName && (
+                        <>
+                          <span>•</span>
+                          <span className="text-zinc-400">Confirmed by {payment.confirmedByName}</span>
+                        </>
+                      )}
+                    </div>
                   </div>
                   <div className="text-right self-end sm:self-auto">
                     <div className="font-semibold text-white text-base sm:text-lg mb-1">{formatCurrency(payment.amount)}</div>

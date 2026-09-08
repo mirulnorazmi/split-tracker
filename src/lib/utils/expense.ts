@@ -11,14 +11,18 @@ export function getUserShare(expense: any, userId: string): number {
   }
   if (Array.isArray(expense.participants)) {
     const found = expense.participants.find(
-      (p: any) => typeof p === 'object' && p?.userId === userId
+      (p: any) => (typeof p === 'object' ? p?.userId === userId : p === userId)
     );
-    if (found && typeof found.amountOwed === 'number') {
-      return Number(found.amountOwed);
+    if (found) {
+      if (typeof found === 'object' && typeof found.amountOwed === 'number') {
+        return Number(found.amountOwed);
+      }
+      return expense.participants.length > 0
+        ? Number(expense.totalAmount) / expense.participants.length
+        : 0;
     }
-    return expense.participants.length > 0
-      ? Number(expense.totalAmount) / expense.participants.length
-      : 0;
+    // User is not a participant in this expense
+    return 0;
   }
   return 0;
 }

@@ -19,6 +19,7 @@ type ParticipantPickerProps = {
   onChangeCustomAmount: (userId: string, value: string) => void;
   equalSplitAmount: number;
   numAmount: number;
+  lockedParticipantId?: string;
 };
 
 /**
@@ -34,6 +35,7 @@ export function ParticipantPicker({
   onChangeCustomAmount,
   equalSplitAmount,
   numAmount,
+  lockedParticipantId,
 }: ParticipantPickerProps) {
   const { users: hookUsers } = useUsers();
   const allUsers = propUsers || hookUsers;
@@ -92,19 +94,37 @@ export function ParticipantPicker({
           <div className="text-center py-6 text-zinc-500 text-sm">No participants found</div>
         ) : (
           filteredUsers.map((user) => {
-            const isSelected = selectedParticipants.includes(user.id);
+            const isLocked = !!lockedParticipantId && user.id === lockedParticipantId;
+            const isSelected = isLocked || selectedParticipants.includes(user.id);
+            const handleToggle = () => {
+              if (isLocked) return;
+              onToggleParticipant(user.id);
+            };
+
             return (
               <div
                 key={user.id}
                 className="w-full flex items-center justify-between p-2 rounded-lg hover:bg-zinc-800/50 transition-colors"
               >
                 <button
-                  onClick={() => onToggleParticipant(user.id)}
-                  className="flex items-center gap-3 flex-1 text-left"
+                  type="button"
+                  onClick={handleToggle}
+                  disabled={isLocked}
+                  className={cn(
+                    'flex items-center gap-3 flex-1 text-left',
+                    isLocked ? 'cursor-default' : 'cursor-pointer'
+                  )}
                 >
                   <AvatarBadge initials={user.initials} avatar={user.avatar} name={user.name} size="md" />
                   <div className="text-left">
-                    <div className="text-sm font-medium text-zinc-200">{user.name}</div>
+                    <div className="text-sm font-medium text-zinc-200 flex items-center gap-2">
+                      <span>{user.name}</span>
+                      {isLocked && (
+                        <span className="text-[10px] font-bold bg-accent/20 text-accent border border-accent/30 px-1.5 py-0.5 rounded leading-none">
+                          Host (Required)
+                        </span>
+                      )}
+                    </div>
                     <div className="text-xs text-zinc-600">User ID: {user.id}</div>
                   </div>
                 </button>
@@ -132,10 +152,14 @@ export function ParticipantPicker({
                       </div>
                     ))}
                   <button
-                    onClick={() => onToggleParticipant(user.id)}
+                    type="button"
+                    disabled={isLocked}
+                    onClick={handleToggle}
+                    title={isLocked ? 'The expense creator is always included as a participant' : undefined}
                     className={cn(
                       'w-5 h-5 rounded-md border flex items-center justify-center transition-colors shrink-0',
-                      isSelected ? 'bg-white border-white' : 'border-zinc-700 bg-zinc-900'
+                      isSelected ? 'bg-white border-white' : 'border-zinc-700 bg-zinc-900',
+                      isLocked && 'cursor-not-allowed opacity-90'
                     )}
                   >
                     {isSelected && (

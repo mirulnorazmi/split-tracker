@@ -23,6 +23,7 @@ export default function NewExpense() {
   const form = useExpenseForm({
     initialCategoryId: categories[0]?.id || '',
     initialParticipants: currentUser ? [currentUser.id] : [],
+    lockedParticipantId: currentUser?.id,
   });
 
   // Ensure default category is selected once categories load
@@ -244,6 +245,7 @@ export default function NewExpense() {
           onChangeCustomAmount={form.handleCustomAmountChange}
           equalSplitAmount={form.equalSplitAmount}
           numAmount={form.numAmount}
+          lockedParticipantId={currentUser?.id}
         />
 
         <div className="pt-6 border-t border-zinc-800">

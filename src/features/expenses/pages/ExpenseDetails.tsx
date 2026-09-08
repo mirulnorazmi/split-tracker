@@ -55,6 +55,7 @@ export default function ExpenseDetails({ expenseId: propExpenseId, onBack }: Exp
     initialCategoryId: expense?.categoryId,
     initialParticipants,
     initialCustomAmounts,
+    lockedParticipantId: expense?.creatorId,
   });
 
   const handleStartEdit = () => {
@@ -77,6 +78,7 @@ export default function ExpenseDetails({ expenseId: propExpenseId, onBack }: Exp
         initialCategoryId: expense.categoryId,
         initialParticipants: pIds,
         initialCustomAmounts: cAmounts,
+        lockedParticipantId: expense.creatorId,
       });
     }
     setStep('edit');
@@ -352,6 +354,7 @@ export default function ExpenseDetails({ expenseId: propExpenseId, onBack }: Exp
             onChangeCustomAmount={form.handleCustomAmountChange}
             equalSplitAmount={form.equalSplitAmount}
             numAmount={form.numAmount}
+            lockedParticipantId={expense.creatorId}
           />
 
           <div className="flex gap-4 pt-4 border-t border-zinc-800">
@@ -396,14 +399,29 @@ export default function ExpenseDetails({ expenseId: propExpenseId, onBack }: Exp
           <div className="text-xs sm:text-sm text-zinc-500 font-medium uppercase tracking-wider">
             {category ? category.name : 'Shared expense'}
           </div>
-          {expense.status === 'Pending' && (
+          {expense.status === 'Pending' ? (
             <span className="px-2.5 py-0.5 rounded-full text-[10px] sm:text-xs font-semibold bg-amber-500/10 text-amber-500 border border-amber-500/20">
               PENDING
+            </span>
+          ) : (
+            <span className="px-2.5 py-0.5 rounded-full text-[10px] sm:text-xs font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 flex items-center gap-1">
+              <Check className="w-3 h-3" /> CONFIRMED
             </span>
           )}
         </div>
         <h1 className="text-2xl sm:text-3xl lg:text-4xl font-light text-white tracking-tight">{expense.title}</h1>
-        <p className="text-zinc-400 mt-2 text-sm sm:text-base">{formatDate(expense.date)}</p>
+        <p className="text-zinc-400 mt-2 text-sm sm:text-base flex flex-wrap items-center gap-1.5">
+          <span>{formatDate(expense.date)}</span>
+          {expense.approvedByName && (
+            <>
+              <span className="text-zinc-600">•</span>
+              <span>
+                Approved by <span className="text-zinc-200 font-medium">{expense.approvedByName}</span>
+                {expense.approvedAt ? ` on ${formatDate(expense.approvedAt)}` : ''}
+              </span>
+            </>
+          )}
+        </p>
       </header>
 
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4">
@@ -424,17 +442,24 @@ export default function ExpenseDetails({ expenseId: propExpenseId, onBack }: Exp
 
       {/* Your Share Card */}
       {(() => {
+        const isParticipant = participantIds.includes(currentUserId);
         const userTotalShare = getUserShare(expense, currentUserId);
         const userPaid = getUserPaidAmount(expense, currentUserId, allExpensePayments);
         const userRemaining = getUserRemainingShare(expense, currentUserId, allExpensePayments);
-        const isSettled = !isHost && userRemaining <= 0;
+        // Host's share is auto-waived if they participated, otherwise normal settlement
+        const isSettled = (isHost && isParticipant) || (!isHost && isParticipant && userRemaining <= 0);
 
         return (
-          <div className="bg-surface-alt border border-zinc-700 rounded-3xl p-5 sm:p-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 sm:gap-0">
+          <div className={`border rounded-3xl p-5 sm:p-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 sm:gap-0 ${isHost && isParticipant ? 'bg-emerald-950/20 border-emerald-800/40' : 'bg-surface-alt border-zinc-700'}`}>
             <div>
               <div className="flex items-center gap-2 mb-1">
                 <div className="text-sm font-semibold text-zinc-400 uppercase tracking-wider">Your Share</div>
-                {isSettled && (
+                {isHost && isParticipant && (
+                  <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                    PAID
+                  </span>
+                )}
+                {!isHost && isParticipant && isSettled && (
                   <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
                     SETTLED
                   </span>
@@ -444,10 +469,19 @@ export default function ExpenseDetails({ expenseId: propExpenseId, onBack }: Exp
                     HOST
                   </span>
                 )}
+                {!isParticipant && (
+                  <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-zinc-800 text-zinc-500 border border-zinc-700">
+                    NON-PARTICIPANT
+                  </span>
+                )}
               </div>
               <div className="text-zinc-500 text-xs sm:text-sm">
                 {isHost
-                  ? 'You created and paid for this expense'
+                  ? isParticipant
+                    ? 'You created and paid for this expense — your share is waived'
+                    : 'You created and paid for this expense on behalf of the participants'
+                  : !isParticipant
+                  ? 'You are not a participant in this expense'
                   : isSettled
                   ? `You have fully paid your share (RM ${userPaid.toFixed(2)})`
                   : userPaid > 0
@@ -456,14 +490,20 @@ export default function ExpenseDetails({ expenseId: propExpenseId, onBack }: Exp
               </div>
             </div>
             <div className="text-right self-end sm:self-auto">
-              <div className="text-3xl sm:text-4xl font-semibold text-white">
-                RM {isHost ? userTotalShare.toFixed(2) : userRemaining.toFixed(2)}
+              <div className={`text-3xl sm:text-4xl font-semibold ${isHost && isParticipant ? 'text-emerald-400' : 'text-white'}`}>
+                RM {userTotalShare.toFixed(2)}
               </div>
-              {!isHost && (
-                <div className="text-[10px] sm:text-xs text-zinc-500 uppercase tracking-wider font-semibold mt-0.5">
-                  {isSettled ? 'Remaining owed' : 'Remaining to pay'}
-                </div>
-              )}
+              <div className={`text-[10px] sm:text-xs uppercase tracking-wider font-semibold mt-0.5 ${isHost && isParticipant ? 'text-emerald-500/70' : 'text-zinc-500'}`}>
+                {isHost
+                  ? isParticipant
+                    ? 'Paid by host'
+                    : 'Paid for others'
+                  : !isParticipant
+                  ? 'No share'
+                  : isSettled
+                  ? 'Fully settled'
+                  : 'Remaining to pay'}
+              </div>
             </div>
           </div>
         );
@@ -482,7 +522,8 @@ export default function ExpenseDetails({ expenseId: propExpenseId, onBack }: Exp
             const uPaid = getUserPaidAmount(expense, u.id, allExpensePayments);
             const uRemaining = getUserRemainingShare(expense, u.id, allExpensePayments);
             const uIsHost = expense.creatorId === u.id;
-            const uIsSettled = !uIsHost && uRemaining <= 0;
+            // Host's share is auto-waived (they paid the full bill upfront)
+            const uIsSettled = uIsHost || uRemaining <= 0;
 
             return (
               <div key={u.id} className="p-3 sm:p-4 rounded-2xl border border-zinc-800/50 bg-zinc-950/50 flex items-center justify-between">
@@ -509,15 +550,18 @@ export default function ExpenseDetails({ expenseId: propExpenseId, onBack }: Exp
                       {uPaid > 0 && !uIsHost && (
                         <span className="text-zinc-400 ml-1.5">• Paid: RM {uPaid.toFixed(2)}</span>
                       )}
+                      {uIsHost && (
+                        <span className="text-emerald-500/70 ml-1.5">• Waived — paid by host</span>
+                      )}
                     </div>
                   </div>
                 </div>
                 <div className="text-right">
-                  <div className="font-semibold text-zinc-200 text-sm sm:text-base">
+                  <div className={`font-semibold text-sm sm:text-base ${uIsHost ? 'text-emerald-400' : 'text-zinc-200'}`}>
                     RM {uIsHost ? uTotal.toFixed(2) : uRemaining.toFixed(2)}
                   </div>
-                  <div className="text-[10px] text-zinc-500 uppercase tracking-wider">
-                    {uIsHost ? 'Total' : uIsSettled ? 'Settled' : 'Remaining'}
+                  <div className={`text-[10px] uppercase tracking-wider font-semibold ${uIsHost ? 'text-emerald-500/70' : 'text-zinc-500'}`}>
+                    {uIsHost ? 'Paid' : uIsSettled ? 'Settled' : 'Remaining'}
                   </div>
                 </div>
               </div>
@@ -681,8 +725,8 @@ export default function ExpenseDetails({ expenseId: propExpenseId, onBack }: Exp
         )}
       </div>
 
-      {/* Bottom Approval Card (if still pending) */}
-      {expense.status === 'Pending' && (
+      {/* Bottom Approval Card (only visible to Admin when still pending) */}
+      {expense.status === 'Pending' && currentUser?.role === 'Admin' && (
         <div className="bg-zinc-900 border border-zinc-800 rounded-3xl p-5 sm:p-6 flex flex-col sm:flex-row items-center justify-between gap-4">
           <div>
             <div className="flex items-center gap-2 mb-1">

@@ -31,6 +31,13 @@ export function useDashboardData() {
 
   useEffect(() => {
     fetchData();
+    const handleRefresh = () => { fetchData(); };
+    window.addEventListener('splittrack:data-changed', handleRefresh);
+    window.addEventListener('focus', handleRefresh);
+    return () => {
+      window.removeEventListener('splittrack:data-changed', handleRefresh);
+      window.removeEventListener('focus', handleRefresh);
+    };
   }, [fetchData]);
 
   return { stats, recentExpenses, recentPayments, isLoading, refetch: fetchData };
@@ -58,6 +65,13 @@ export function useExpenses(params?: { status?: string; creatorId?: string }) {
 
   useEffect(() => {
     fetchExpenses();
+    const handleRefresh = () => { fetchExpenses(); };
+    window.addEventListener('splittrack:data-changed', handleRefresh);
+    window.addEventListener('focus', handleRefresh);
+    return () => {
+      window.removeEventListener('splittrack:data-changed', handleRefresh);
+      window.removeEventListener('focus', handleRefresh);
+    };
   }, [fetchExpenses]);
 
   return { expenses, isLoading, refetch: fetchExpenses };
@@ -141,6 +155,13 @@ export function usePayments(params?: { status?: string; payerId?: string; payeeI
 
   useEffect(() => {
     fetchPayments();
+    const handleRefresh = () => { fetchPayments(); };
+    window.addEventListener('splittrack:data-changed', handleRefresh);
+    window.addEventListener('focus', handleRefresh);
+    return () => {
+      window.removeEventListener('splittrack:data-changed', handleRefresh);
+      window.removeEventListener('focus', handleRefresh);
+    };
   }, [fetchPayments]);
 
   return { payments, isLoading, refetch: fetchPayments };
@@ -168,6 +189,13 @@ export function useUsers(params?: { status?: string; role?: string }) {
 
   useEffect(() => {
     fetchUsers();
+    const handleRefresh = () => { fetchUsers(); };
+    window.addEventListener('splittrack:data-changed', handleRefresh);
+    window.addEventListener('focus', handleRefresh);
+    return () => {
+      window.removeEventListener('splittrack:data-changed', handleRefresh);
+      window.removeEventListener('focus', handleRefresh);
+    };
   }, [fetchUsers]);
 
   return { users, isLoading, refetch: fetchUsers };

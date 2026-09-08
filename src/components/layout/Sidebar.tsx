@@ -14,9 +14,20 @@ export default function Sidebar({ onClose }: SidebarProps) {
   const { user, logout } = useAuth();
   const isAdmin = user?.role === 'Admin';
 
-  const { expenses } = useExpenses(isAdmin ? { status: 'Pending' } : undefined);
-  const { payments } = usePayments(isAdmin ? { status: 'Pending' } : undefined);
-  const { users } = useUsers(isAdmin ? { status: 'Pending' } : undefined);
+  const { expenses, refetch: refetchExpenses } = useExpenses(isAdmin ? { status: 'Pending' } : undefined);
+  const { payments, refetch: refetchPayments } = usePayments(isAdmin ? { status: 'Pending' } : undefined);
+  const { users, refetch: refetchUsers } = useUsers(isAdmin ? { status: 'Pending' } : undefined);
+
+  // Poll every 4 seconds for Admins so new submissions from any user appear live
+  React.useEffect(() => {
+    if (!isAdmin) return;
+    const interval = setInterval(() => {
+      refetchExpenses();
+      refetchPayments();
+      refetchUsers();
+    }, 4000);
+    return () => clearInterval(interval);
+  }, [isAdmin, refetchExpenses, refetchPayments, refetchUsers]);
 
   const pendingApprovalsCount = isAdmin
     ? (expenses?.filter((e) => e.status === 'Pending').length || 0) +

@@ -10,6 +10,7 @@ type UseExpenseFormOptions = {
   initialParticipants?: string[];
   initialSplitMethod?: SplitMethod;
   initialCustomAmounts?: Record<string, string>;
+  lockedParticipantId?: string;
 };
 
 /**
@@ -23,11 +24,18 @@ export function useExpenseForm({
   initialParticipants = [],
   initialSplitMethod = 'equal',
   initialCustomAmounts = {},
+  lockedParticipantId,
 }: UseExpenseFormOptions = {}) {
   const [title, setTitle] = useState<string>(initialTitle);
   const [amount, setAmount] = useState<string>(initialAmount);
   const [selectedCategory, setSelectedCategory] = useState<string>(initialCategoryId);
-  const [selectedParticipants, setSelectedParticipants] = useState<string[]>(initialParticipants);
+  const [selectedParticipants, setSelectedParticipants] = useState<string[]>(() => {
+    const list = [...initialParticipants];
+    if (lockedParticipantId && !list.includes(lockedParticipantId)) {
+      list.push(lockedParticipantId);
+    }
+    return list;
+  });
   const [splitMethod, setSplitMethod] = useState<SplitMethod>(initialSplitMethod);
   const [customAmounts, setCustomAmounts] = useState<Record<string, string>>(initialCustomAmounts);
 
@@ -46,9 +54,24 @@ export function useExpenseForm({
 
   useEffect(() => {
     if (initialParticipants && initialParticipants.length > 0) {
-      setSelectedParticipants(initialParticipants);
+      const list = [...initialParticipants];
+      if (lockedParticipantId && !list.includes(lockedParticipantId)) {
+        list.push(lockedParticipantId);
+      }
+      setSelectedParticipants(list);
     }
-  }, [JSON.stringify(initialParticipants)]);
+  }, [JSON.stringify(initialParticipants), lockedParticipantId]);
+
+  useEffect(() => {
+    if (lockedParticipantId) {
+      setSelectedParticipants((prev) => {
+        if (!prev.includes(lockedParticipantId)) {
+          return [lockedParticipantId, ...prev];
+        }
+        return prev;
+      });
+    }
+  }, [lockedParticipantId]);
 
   useEffect(() => {
     if (initialCustomAmounts && Object.keys(initialCustomAmounts).length > 0) {
@@ -63,10 +86,15 @@ export function useExpenseForm({
   }, [initialSplitMethod]);
 
   const resetForm = (data?: UseExpenseFormOptions) => {
+    const nextLocked = data?.lockedParticipantId ?? lockedParticipantId;
+    let nextParticipants = data?.initialParticipants ?? initialParticipants;
+    if (nextLocked && !nextParticipants.includes(nextLocked)) {
+      nextParticipants = [nextLocked, ...nextParticipants];
+    }
     setTitle(data?.initialTitle ?? initialTitle);
     setAmount(data?.initialAmount ?? initialAmount);
     setSelectedCategory(data?.initialCategoryId ?? initialCategoryId);
-    setSelectedParticipants(data?.initialParticipants ?? initialParticipants);
+    setSelectedParticipants(nextParticipants);
     setSplitMethod(data?.initialSplitMethod ?? initialSplitMethod);
     setCustomAmounts(data?.initialCustomAmounts ?? initialCustomAmounts);
   };
@@ -83,6 +111,10 @@ export function useExpenseForm({
     !!title && !!amount && selectedParticipants.length > 0 && (splitMethod === 'equal' || isCustomValid);
 
   const toggleParticipant = (id: string) => {
+    // Creator cannot be removed from participants
+    if (lockedParticipantId && id === lockedParticipantId) {
+      return;
+    }
     setSelectedParticipants((prev) => {
       const isSelected = prev.includes(id);
       if (isSelected) {

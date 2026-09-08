@@ -105,14 +105,16 @@ export default async function paymentRoutes(fastify: FastifyInstance) {
     const { rows } = await query(
       `SELECT p.id, p.date, p.confirmed_date AS "confirmedDate", p.amount,
               p.payer_id AS "payerId", p.payee_id AS "payeeId", p.status,
+              p.confirmed_by AS "confirmedById", approver.name AS "confirmedByName",
               payer.name AS "payerName", payee.name AS "payeeName",
               COALESCE(json_agg(json_build_object('expenseId', epm.expense_id, 'amountApplied', epm.amount_applied)) FILTER (WHERE epm.expense_id IS NOT NULL), '[]') AS "expensesApplied"
        FROM payment p
        JOIN "user" payer ON payer.id = p.payer_id
        JOIN "user" payee ON payee.id = p.payee_id
+       LEFT JOIN "user" approver ON approver.id = p.confirmed_by
        LEFT JOIN expense_payment epm ON epm.payment_id = p.id
        ${where}
-       GROUP BY p.id, payer.id, payee.id
+       GROUP BY p.id, payer.id, payee.id, approver.id
        ORDER BY p.date DESC`,
       params
     );
@@ -148,21 +150,30 @@ export default async function paymentRoutes(fastify: FastifyInstance) {
     }
 
     const { rows } = await query(
-      `UPDATE payment SET status = $1, confirmed_date = NOW(), updated_at = NOW()
-       WHERE id = $2 AND status = 'Pending'
-       RETURNING id, status, confirmed_date AS "confirmedDate"`,
-      [status, id]
+      `UPDATE payment SET status = $1, confirmed_by = $2, confirmed_date = NOW(), updated_at = NOW()
+       WHERE id = $3 AND status = 'Pending'
+       RETURNING id, status, confirmed_date AS "confirmedDate", confirmed_by AS "confirmedById"`,
+      [status, userId, id]
     );
 
     if (rows.length === 0) {
-      const { rows: existing } = await query('SELECT id, status, confirmed_date AS "confirmedDate" FROM payment WHERE id = $1', [id]);
+      const { rows: existing } = await query(
+        `SELECT p.id, p.status, p.confirmed_date AS "confirmedDate", p.confirmed_by AS "confirmedById", approver.name AS "confirmedByName"
+         FROM payment p
+         LEFT JOIN "user" approver ON approver.id = p.confirmed_by
+         WHERE p.id = $1`,
+        [id]
+      );
       if (existing.length > 0) {
-        return reply.send({ id: existing[0].id, status: existing[0].status, message: 'Payment is already confirmed.' });
+        return reply.send({ ...existing[0], message: 'Payment is already confirmed.' });
       }
       return reply.status(404).send({ error: 'Not Found', message: 'Payment not found' });
     }
 
-    return reply.send({ ...rows[0], message: 'Payment confirmed successfully.' });
+    const { rows: approverRows } = await query('SELECT name FROM "user" WHERE id = $1', [userId]);
+    const confirmedByName = approverRows[0]?.name || null;
+
+    return reply.send({ ...rows[0], confirmedByName, message: 'Payment confirmed successfully.' });
   };
 
   fastify.patch('/payments/:id/status', { preHandler: [fastify.authenticate] }, handleUpdatePaymentStatus);

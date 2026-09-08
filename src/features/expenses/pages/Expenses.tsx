@@ -213,7 +213,22 @@ export default function Expenses() {
                           </span>
                         )}
                       </div>
-                      <div className="text-[11px] sm:text-xs text-zinc-500 mb-1 sm:mb-2">Created on {formatDate(expense.date)} • {numParticipants} people</div>
+                      <div className="text-[11px] sm:text-xs text-zinc-500 mb-1 sm:mb-2 flex flex-wrap items-center gap-1.5">
+                        <span>Created on {formatDate(expense.date)}</span>
+                        <span>•</span>
+                        <span>{numParticipants} people</span>
+                        {expense.approvedByName && (
+                          <>
+                            <span>•</span>
+                            <span className="text-zinc-400">Approved by {expense.approvedByName}</span>
+                          </>
+                        )}
+                        {expense.status === 'Pending' && (
+                          <span className="px-1.5 py-0.5 rounded text-[9px] font-semibold bg-amber-500/10 text-amber-400 border border-amber-500/20">
+                            Pending
+                          </span>
+                        )}
+                      </div>
                       <div className="flex -space-x-2">
                         {expenseUsers.slice(0, 5).map((u) => (
                           <div

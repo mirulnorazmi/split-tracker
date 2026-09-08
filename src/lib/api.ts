@@ -70,6 +70,10 @@ async function request<T = any>(
     throw new ApiError(res.status, data);
   }
 
+  if (method !== 'GET' && typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('splittrack:data-changed'));
+  }
+
   return data as T;
 }
 
@@ -163,7 +167,7 @@ export const api = {
   ) => request<Expense>('PUT', `/expenses/${id}`, data),
 
   updateExpenseStatus: (id: string, status: string) =>
-    request<{ id: string; status: string; message: string }>('PATCH', `/expenses/${id}/status`, { status }),
+    request<{ id: string; status: string; approvedById?: string; approvedByName?: string; approvedAt?: string; message: string }>('PATCH', `/expenses/${id}/status`, { status }),
 
   // Payments
   createPayment: (data: {
@@ -183,7 +187,7 @@ export const api = {
   },
 
   updatePaymentStatus: (id: string, status: string) =>
-    request<{ id: string; status: string; confirmedDate: string; message: string }>('PATCH', `/payments/${id}/status`, { status }),
+    request<{ id: string; status: string; confirmedDate: string; confirmedById?: string; confirmedByName?: string; message: string }>('PATCH', `/payments/${id}/status`, { status }),
 
   // Dashboard
   getDashboardStats: () =>
@@ -222,6 +226,9 @@ export interface Expense {
   status: string;
   categoryId: string;
   creatorId: string;
+  approvedById?: string | null;
+  approvedByName?: string | null;
+  approvedAt?: string | null;
   categoryName?: string;
   categoryIcon?: string;
   categoryColor?: string;
@@ -232,6 +239,8 @@ export interface Payment {
   id: string;
   date: string;
   confirmedDate?: string | null;
+  confirmedById?: string | null;
+  confirmedByName?: string | null;
   amount: number;
   payerId: string;
   payeeId: string;

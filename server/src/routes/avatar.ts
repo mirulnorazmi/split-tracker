@@ -93,8 +93,8 @@ export default async function avatarRoutes(fastify: FastifyInstance) {
       'Content-Type': data.mimetype,
     });
 
-    // Always route through the fastify /avatars proxy route so images load without CORS or external storage DNS issues
-    const avatarUrl = `/avatars/${fileName}`;
+    const publicBase = config.minio.publicUrl.replace(/\/+$/, '');
+    const avatarUrl = `${publicBase}/${objectName.replace(/^\/+/, '')}`;
 
     await query(
       `UPDATE "user" SET avatar = $1, updated_at = NOW() WHERE id = $2`,

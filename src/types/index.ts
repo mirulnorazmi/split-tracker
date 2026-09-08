@@ -24,6 +24,9 @@ export type Expense = {
   participants: string[]; // Array of User IDs
   creatorId: string;
   status: 'Pending' | 'Confirmed';
+  approvedById?: string;
+  approvedByName?: string;
+  approvedAt?: string;
   splits?: Record<string, number>; // Maps user ID to specific split amount
 };
 
@@ -31,6 +34,8 @@ export type Payment = {
   id: string;
   date: string;
   confirmedDate?: string;
+  confirmedById?: string;
+  confirmedByName?: string;
   amount: number;
   payerId: string;
   payeeId?: string;

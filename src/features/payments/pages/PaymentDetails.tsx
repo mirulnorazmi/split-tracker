@@ -90,7 +90,12 @@ export default function PaymentDetails({ paymentId: propPaymentId, onBack }: Pay
           {payment.confirmedDate && (
             <>
               <div className="w-1 h-1 bg-zinc-700 rounded-full hidden sm:block" />
-              <div>Confirmed on <span className="text-zinc-300 font-medium">{formatDate(payment.confirmedDate)}</span></div>
+              <div>
+                Confirmed on <span className="text-zinc-300 font-medium">{formatDate(payment.confirmedDate)}</span>
+                {payment.confirmedByName && (
+                  <> by <span className="text-zinc-200 font-medium">{payment.confirmedByName}</span></>
+                )}
+              </div>
             </>
           )}
         </div>
