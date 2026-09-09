@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { KeyRound, ShieldCheck, AlertCircle, CheckCircle2, Loader2 } from 'lucide-react';
+import { KeyRound, ShieldCheck, AlertCircle, CheckCircle2, Loader2, Sparkles } from 'lucide-react';
 import { api } from '@/lib/api';
 
 export default function Settings() {
@@ -128,6 +128,30 @@ export default function Settings() {
             </button>
           </div>
         </form>
+      </div>
+
+      {/* App Guide Card */}
+      <div className="bg-zinc-900 border border-zinc-800 rounded-3xl overflow-hidden shadow-xl shadow-black/30">
+        <div className="p-5 sm:p-8 flex flex-col sm:flex-row sm:items-center justify-between gap-5">
+          <div className="flex items-start gap-4">
+            <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-2xl bg-[#C9FF55]/10 border border-[#C9FF55]/20 flex items-center justify-center text-[#C9FF55] shrink-0">
+              <Sparkles className="w-5 h-5 sm:w-6 sm:h-6" />
+            </div>
+            <div>
+              <h2 className="text-lg sm:text-xl font-semibold text-white">App Guide & Walkthrough</h2>
+              <p className="text-xs sm:text-sm text-zinc-400 mt-1">
+                Need a refresher on how modules, group splits, and recurring cycles work?
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => window.dispatchEvent(new CustomEvent('splittrack:open-onboarding'))}
+            className="px-5 py-2.5 bg-zinc-800 hover:bg-zinc-700 text-white border border-zinc-700 font-medium rounded-full transition-colors text-xs sm:text-sm shrink-0 cursor-pointer self-start sm:self-auto"
+          >
+            Launch Tour Guide
+          </button>
+        </div>
       </div>
     </div>
   );

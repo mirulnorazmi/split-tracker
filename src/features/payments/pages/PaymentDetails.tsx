@@ -66,6 +66,8 @@ export default function PaymentDetails({ paymentId: propPaymentId, onBack }: Pay
 
   const payee = users.find((u) => u.id === payment.payeeId);
   const payeeName = payment.payeeName || payee?.name || 'Unknown';
+  const payer = users.find((u) => u.id === payment.payerId);
+  const payerName = payment.payerName || payer?.name || (payment.payerId === currentUser?.id ? (currentUser?.name || 'You') : 'Participant');
   const appliedExpenseIds = payment.expensesApplied
     ? payment.expensesApplied.map((ea: any) => ea.expenseId)
     : [];
@@ -104,41 +106,63 @@ export default function PaymentDetails({ paymentId: propPaymentId, onBack }: Pay
       <div className="bg-surface-alt border border-zinc-800 rounded-3xl p-6 sm:p-8 flex flex-col sm:flex-row items-center justify-between gap-4 sm:gap-6">
         <div>
           <div className="text-sm font-semibold text-zinc-500 uppercase tracking-wider mb-1">Total Amount</div>
-          <div className="text-zinc-400 text-sm">Paid by you</div>
+          <div className="text-zinc-400 text-sm">Paid by <span className="text-zinc-300 font-medium">{payerName}</span></div>
         </div>
         <div className="text-4xl sm:text-5xl font-light text-white">RM {Number(payment.amount).toFixed(2)}</div>
       </div>
 
       <div className="space-y-4">
         <h3 className="text-lg font-medium text-white mb-4">Sessions paid for</h3>
-        {paymentExpenses.length === 0 ? (
+        {paymentExpenses.length === 0 && (!payment.recurringItemsApplied || payment.recurringItemsApplied.length === 0) ? (
           <div className="p-8 text-center border border-zinc-800/50 rounded-2xl bg-zinc-900/50 text-zinc-500">
             No specific sessions attached to this payment.
           </div>
         ) : (
-          paymentExpenses.map((expense) => {
-            const applied = payment.expensesApplied?.find((ea: any) => ea.expenseId === expense.id);
-            const appliedAmount = applied ? applied.amountApplied : expense.totalAmount;
-            return (
-              <div key={expense.id} className="p-4 sm:p-5 rounded-2xl border border-zinc-800/50 bg-zinc-900/50 flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3 sm:gap-0">
+          <>
+            {paymentExpenses.map((expense) => {
+              const applied = payment.expensesApplied?.find((ea: any) => ea.expenseId === expense.id);
+              const appliedAmount = applied ? applied.amountApplied : expense.totalAmount;
+              return (
+                <div key={expense.id} className="p-4 sm:p-5 rounded-2xl border border-zinc-800/50 bg-zinc-900/50 flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3 sm:gap-0">
+                  <div>
+                    <div className="font-medium text-zinc-200 mb-1 flex items-center gap-2 text-sm sm:text-base">
+                      {expense.title}
+                      {expense.categoryName && (
+                        <span className="text-[9px] sm:text-[10px] uppercase font-bold tracking-wider text-zinc-500 bg-zinc-800 px-1.5 sm:px-2 py-0.5 rounded-full">
+                          {expense.categoryName}
+                        </span>
+                      )}
+                    </div>
+                    <div className="text-xs text-zinc-500">{formatDate(expense.date)}</div>
+                  </div>
+                  <div className="text-right self-end sm:self-auto">
+                    <div className="font-semibold text-white text-base sm:text-lg mb-1">RM {Number(appliedAmount).toFixed(2)}</div>
+                    <div className="text-[9px] sm:text-[10px] uppercase tracking-wider text-zinc-500 font-bold">Applied</div>
+                  </div>
+                </div>
+              );
+            })}
+            
+            {payment.recurringItemsApplied?.map((item: any) => (
+              <div key={item.cycleItemId} className="p-4 sm:p-5 rounded-2xl border border-zinc-800/50 bg-zinc-900/50 flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3 sm:gap-0">
                 <div>
                   <div className="font-medium text-zinc-200 mb-1 flex items-center gap-2 text-sm sm:text-base">
-                    {expense.title}
-                    {expense.categoryName && (
-                      <span className="text-[9px] sm:text-[10px] uppercase font-bold tracking-wider text-zinc-500 bg-zinc-800 px-1.5 sm:px-2 py-0.5 rounded-full">
-                        {expense.categoryName}
-                      </span>
-                    )}
+                    {item.title}
+                    <span className="text-[9px] sm:text-[10px] uppercase font-bold tracking-wider text-accent bg-accent/10 px-1.5 sm:px-2 py-0.5 rounded-full">
+                      Subscription
+                    </span>
                   </div>
-                  <div className="text-xs text-zinc-500">{formatDate(expense.date)}</div>
+                  <div className="text-xs text-zinc-500">
+                    {item.periodKey ? `Recurring cycle for ${new Date(item.periodKey + '-01').toLocaleDateString('en-GB', { month: 'long', year: 'numeric' })}` : 'Recurring cycle payment'}
+                  </div>
                 </div>
                 <div className="text-right self-end sm:self-auto">
-                  <div className="font-semibold text-white text-base sm:text-lg mb-1">RM {Number(appliedAmount).toFixed(2)}</div>
+                  <div className="font-semibold text-white text-base sm:text-lg mb-1">RM {Number(item.amountApplied).toFixed(2)}</div>
                   <div className="text-[9px] sm:text-[10px] uppercase tracking-wider text-zinc-500 font-bold">Applied</div>
                 </div>
               </div>
-            );
-          })
+            ))}
+          </>
         )}
       </div>
 

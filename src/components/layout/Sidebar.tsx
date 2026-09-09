@@ -1,52 +1,34 @@
 import React from 'react';
 import { NavLink } from 'react-router-dom';
-import { LayoutGrid, FileText, CreditCard, User, Settings, CheckSquare, Users, X, LogOut } from 'lucide-react';
+import { LayoutGrid, FileText, CreditCard, Repeat, User, Settings, CheckSquare, Users, X, LogOut, HelpCircle } from 'lucide-react';
 import { cn } from '@/lib/utils/cn';
 import { useAuth } from '@/app/AuthContext';
-import { useExpenses, usePayments, useUsers } from '@/lib/hooks/useData';
+import { useAdminPendingCounts } from '@/lib/hooks/useData';
 import { APP_NAME } from '@/lib/constants';
 
 type SidebarProps = {
   onClose?: () => void;
+  isLocked?: boolean;
 };
 
-export default function Sidebar({ onClose }: SidebarProps) {
+export default function Sidebar({ onClose, isLocked }: SidebarProps) {
   const { user, logout } = useAuth();
   const isAdmin = user?.role === 'Admin';
 
-  const { expenses, refetch: refetchExpenses } = useExpenses(isAdmin ? { status: 'Pending' } : undefined);
-  const { payments, refetch: refetchPayments } = usePayments(isAdmin ? { status: 'Pending' } : undefined);
-  const { users, refetch: refetchUsers } = useUsers(isAdmin ? { status: 'Pending' } : undefined);
-
-  // Poll every 4 seconds for Admins so new submissions from any user appear live
-  React.useEffect(() => {
-    if (!isAdmin) return;
-    const interval = setInterval(() => {
-      refetchExpenses();
-      refetchPayments();
-      refetchUsers();
-    }, 4000);
-    return () => clearInterval(interval);
-  }, [isAdmin, refetchExpenses, refetchPayments, refetchUsers]);
-
-  const pendingApprovalsCount = isAdmin
-    ? (expenses?.filter((e) => e.status === 'Pending').length || 0) +
-      (payments?.filter((p) => p.status === 'Pending').length || 0)
-    : 0;
-
-  const pendingUsersCount = isAdmin
-    ? users?.filter((u) => u.status === 'Pending').length || 0
-    : 0;
+  const { pendingApprovals, pendingUsers } = useAdminPendingCounts();
+  const pendingApprovalsCount = isAdmin ? pendingApprovals : 0;
+  const pendingUsersCount = isAdmin ? pendingUsers : 0;
 
   const workspaceLinks = [
-    { to: '/dashboard', label: 'Dashboard', icon: LayoutGrid },
-    { to: '/expenses', label: 'Expenses', icon: FileText },
-    { to: '/payments', label: 'Payments', icon: CreditCard },
+    { to: '/dashboard', label: 'Dashboard', icon: LayoutGrid, tourId: 'sidebar-dashboard' },
+    { to: '/expenses', label: 'Expenses', icon: FileText, tourId: 'sidebar-expenses' },
+    { to: '/subscriptions', label: 'Subscriptions', icon: Repeat, tourId: 'sidebar-subscriptions' },
+    { to: '/payments', label: 'Payments', icon: CreditCard, tourId: 'sidebar-payments' },
   ];
 
   const accountLinks = [
-    { to: '/profile', label: 'Profile', icon: User },
-    { to: '/settings', label: 'Settings', icon: Settings },
+    { to: '/profile', label: 'Profile', icon: User, tourId: 'sidebar-profile' },
+    { to: '/settings', label: 'Settings', icon: Settings, tourId: 'sidebar-settings' },
   ];
 
   const managementLinks = [
@@ -56,6 +38,7 @@ export default function Sidebar({ onClose }: SidebarProps) {
       icon: CheckSquare,
       badgeCount: pendingApprovalsCount,
       badgeColor: 'red' as const,
+      tourId: 'sidebar-approvals',
     },
     {
       to: '/users',
@@ -63,6 +46,7 @@ export default function Sidebar({ onClose }: SidebarProps) {
       icon: Users,
       badgeCount: pendingUsersCount,
       badgeColor: 'amber' as const,
+      tourId: 'sidebar-users',
     },
   ];
 
@@ -73,11 +57,13 @@ export default function Sidebar({ onClose }: SidebarProps) {
   return (
     <div className="w-64 border-r border-zinc-800 bg-zinc-900 flex flex-col h-screen overflow-y-auto select-none">
       <div className="p-6 flex items-center gap-3">
-        <div className="w-8 h-8 bg-accent rounded-xl flex items-center justify-center font-bold text-accent-text text-sm shadow-md shadow-accent/20">
-          $
-        </div>
+        <img
+          src="/logo.webp"
+          alt={APP_NAME}
+          className="w-8 h-8 rounded-xl object-cover shadow-md shadow-accent/20 border border-zinc-800 shrink-0"
+        />
         <span className="font-semibold text-white tracking-tight">{APP_NAME}</span>
-        {onClose && (
+        {onClose && !isLocked && (
           <button
             onClick={onClose}
             className="ml-auto w-8 h-8 rounded-lg bg-zinc-800 border border-zinc-700 flex items-center justify-center text-zinc-400 hover:text-white hover:bg-zinc-700 transition-colors lg:hidden"
@@ -95,6 +81,7 @@ export default function Sidebar({ onClose }: SidebarProps) {
             <NavLink
               key={link.to}
               to={link.to}
+              data-tour={link.tourId}
               onClick={onClose}
               className={({ isActive }) =>
                 cn(
@@ -123,6 +110,7 @@ export default function Sidebar({ onClose }: SidebarProps) {
                 <NavLink
                   key={link.to}
                   to={link.to}
+                  data-tour={link.tourId}
                   onClick={onClose}
                   className={({ isActive }) =>
                     cn(
@@ -169,6 +157,7 @@ export default function Sidebar({ onClose }: SidebarProps) {
             <NavLink
               key={link.to}
               to={link.to}
+              data-tour={link.tourId}
               onClick={onClose}
               className={({ isActive }) =>
                 cn(
@@ -183,6 +172,18 @@ export default function Sidebar({ onClose }: SidebarProps) {
               {link.label}
             </NavLink>
           ))}
+          <button
+            type="button"
+            data-tour="sidebar-guide"
+            onClick={() => {
+              if (onClose) onClose();
+              window.dispatchEvent(new CustomEvent('splittrack:open-onboarding'));
+            }}
+            className="w-full flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-medium text-zinc-400 hover:text-white hover:bg-zinc-800/40 border border-transparent transition-colors duration-150 cursor-pointer text-left"
+          >
+            <HelpCircle className="w-4 h-4 text-[#C9FF55]" />
+            <span>App Guide</span>
+          </button>
         </nav>
       </div>
 

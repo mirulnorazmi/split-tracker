@@ -17,6 +17,7 @@ import expenseRoutes from './routes/expenses.js';
 import paymentRoutes from './routes/payments.js';
 import dashboardRoutes from './routes/dashboard.js';
 import avatarRoutes from './routes/avatar.js';
+import recurringRoutes from './routes/recurring.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -83,6 +84,7 @@ export async function buildServer() {
   await fastify.register(paymentRoutes);
   await fastify.register(dashboardRoutes);
   await fastify.register(avatarRoutes);
+  await fastify.register(recurringRoutes);
 
   // ── 4. Health Check (logLevel: 'silent' completely stops Kubernetes probe logs) ──
   fastify.get('/health', { logLevel: 'silent' }, async () => ({
@@ -104,6 +106,18 @@ export async function buildServer() {
       root: distPath,
       prefix: '/',
       wildcard: false, // Let custom notFoundHandler handle SPA client-side routes
+      setHeaders: (res, pathName) => {
+        if (pathName.includes('/assets/')) {
+          // Versioned hashed assets (e.g. index-*.js, vendor-*.js, index-*.css)
+          res.header('Cache-Control', 'public, max-age=31536000, immutable');
+        } else if (pathName.endsWith('.html')) {
+          // HTML files revalidate so deployments update immediately
+          res.header('Cache-Control', 'no-cache');
+        } else {
+          // Non-hashed static assets (e.g. logo.webp, images)
+          res.header('Cache-Control', 'public, max-age=2592000');
+        }
+      },
     });
 
     // Intercept browser page navigation for client-side routes (e.g. /expenses, /payments, /users, /dashboard)

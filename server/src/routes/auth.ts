@@ -203,4 +203,42 @@ export default async function authRoutes(fastify: FastifyInstance) {
 
   fastify.post('/auth/change-password', { preHandler: [fastify.authenticate] }, handleChangePassword);
   fastify.post('/users/change-password', { preHandler: [fastify.authenticate] }, handleChangePassword);
+
+  /**
+   * POST /auth/reset-password
+   * Public — reset password using a valid reset token (from email link).
+   * No authentication required.
+   */
+  fastify.post('/auth/reset-password', async (request: FastifyRequest, reply: FastifyReply) => {
+    const { token, newPassword } = request.body as { token: string; newPassword: string };
+
+    if (!token) {
+      return reply.status(400).send({ error: 'Bad Request', message: 'Reset token is required' });
+    }
+
+    if (!newPassword || newPassword.length < 8) {
+      return reply.status(400).send({ error: 'Bad Request', message: 'New password must be at least 8 characters' });
+    }
+
+    // Find user with valid (non-expired) reset token
+    const { rows } = await query(
+      `SELECT id FROM "user" WHERE password_reset_token = $1 AND password_reset_expires > NOW()`,
+      [token]
+    );
+
+    if (rows.length === 0) {
+      return reply.status(400).send({ error: 'Bad Request', message: 'Invalid or expired reset token. Please request a new password reset from your administrator.' });
+    }
+
+    const userId = rows[0].id;
+    const hashedPassword = await bcrypt.hash(newPassword, 12);
+
+    // Update password and clear reset token
+    await query(
+      `UPDATE "user" SET password = $1, password_reset_token = NULL, password_reset_expires = NULL, updated_at = NOW() WHERE id = $2`,
+      [hashedPassword, userId]
+    );
+
+    return reply.send({ message: 'Password has been reset successfully. You can now sign in with your new password.' });
+  });
 }

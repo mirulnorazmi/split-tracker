@@ -1,6 +1,6 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import { Info } from 'lucide-react';
+import { Info, ChevronLeft, ChevronRight } from 'lucide-react';
 import { useAuth } from '@/app/AuthContext';
 import { useDashboardData, usePayments, useExpenses, useUsers } from '@/lib/hooks/useData';
 import { formatCurrency } from '@/lib/utils/currency';
@@ -12,6 +12,12 @@ export default function Payments() {
   const { payments, isLoading } = usePayments({ payerId: currentUser?.id });
   const { expenses } = useExpenses();
   const { users } = useUsers();
+
+  const [page, setPage] = useState(1);
+  const ITEMS_PER_PAGE = 10;
+
+  const totalPages = Math.ceil(payments.length / ITEMS_PER_PAGE);
+  const paginatedPayments = payments.slice((page - 1) * ITEMS_PER_PAGE, page * ITEMS_PER_PAGE);
 
   const totalOwed = stats?.totalOwed ?? 0;
   const confirmedPayments = stats?.confirmedPayments ?? 0;
@@ -57,7 +63,7 @@ export default function Payments() {
           </div>
         </div>
         <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-4 sm:p-5 flex flex-col justify-between">
-          <div className="mb-3 sm:mb-4"><span className="text-[10px] sm:text-xs font-semibold text-zinc-500 uppercase tracking-wider">Total Owed</span></div>
+          <div className="mb-3 sm:mb-4"><span className="text-[10px] sm:text-xs font-semibold text-zinc-500 uppercase tracking-wider">Total Shared</span></div>
           <div>
             <div className="text-2xl sm:text-3xl lg:text-4xl font-light text-white mb-1">{formatCurrency(totalOwed)}</div>
             <div className="text-[10px] sm:text-xs text-zinc-500">From shared expenses</div>
@@ -94,17 +100,29 @@ export default function Payments() {
               <div className="text-sm text-zinc-600">Your submitted payments will appear here.</div>
             </div>
           ) : (
-            payments.map((payment) => {
+            paginatedPayments.map((payment) => {
               const payee = users.find((u) => u.id === payment.payeeId);
               const payeeName = payment.payeeName || payee?.name || 'Unknown';
               const appliedExpenseIds = payment.expensesApplied
                 ? payment.expensesApplied.map((ea: any) => ea.expenseId)
                 : [];
               const paymentExpenses = expenses.filter((e) => appliedExpenseIds.includes(e.id));
-              const sessionName =
-                paymentExpenses.length > 1
-                  ? `${paymentExpenses.length} sessions`
-                  : paymentExpenses[0]?.title || 'Expense payment';
+              
+              let sessionName = 'Expense payment';
+              if (paymentExpenses.length > 1) {
+                sessionName = `${paymentExpenses.length} sessions`;
+              } else if (paymentExpenses.length === 1) {
+                sessionName = paymentExpenses[0].title;
+              } else if (payment.recurringItemsApplied && payment.recurringItemsApplied.length > 0) {
+                const item = payment.recurringItemsApplied[0];
+                const count = payment.recurringItemsApplied.length;
+                if (count === 1 && item.periodKey) {
+                  const d = new Date(item.periodKey + '-01');
+                  sessionName = `${item.title} (${d.toLocaleDateString('en-GB', { month: 'short', year: 'numeric' })})`;
+                } else {
+                  sessionName = count > 1 ? `${item.title} (${count} cycles)` : item.title;
+                }
+              }
 
               return (
                 <button
@@ -140,6 +158,36 @@ export default function Payments() {
             })
           )}
         </div>
+        
+        {/* Pagination Controls */}
+        {totalPages >= 1 && (
+          <div className="flex items-center justify-between mt-6 pt-6 border-t border-zinc-800/50">
+            <div className="text-xs sm:text-sm text-zinc-500">
+              Showing <span className="text-zinc-300 font-medium">{(page - 1) * ITEMS_PER_PAGE + 1}</span> to{' '}
+              <span className="text-zinc-300 font-medium">{Math.min(page * ITEMS_PER_PAGE, payments.length)}</span> of{' '}
+              <span className="text-zinc-300 font-medium">{payments.length}</span> results
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+                disabled={page === 1}
+                className="p-1 sm:p-2 rounded-lg border border-zinc-800 text-zinc-400 hover:text-white hover:bg-zinc-800 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              >
+                <ChevronLeft className="w-4 h-4" />
+              </button>
+              <div className="text-sm font-medium text-zinc-300 px-2 sm:px-4">
+                Page {page} of {totalPages}
+              </div>
+              <button
+                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                disabled={page === totalPages}
+                className="p-1 sm:p-2 rounded-lg border border-zinc-800 text-zinc-400 hover:text-white hover:bg-zinc-800 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              >
+                <ChevronRight className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-3 sm:p-5 flex gap-3 sm:gap-4 items-start">

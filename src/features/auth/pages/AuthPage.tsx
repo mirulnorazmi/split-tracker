@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Mail, Lock, User as UserIcon, ArrowRight, Eye, EyeOff, AlertCircle, CheckCircle2, Loader2, Sparkles } from 'lucide-react';
 import { useAuth } from '@/app/AuthContext';
 import { APP_NAME } from '@/lib/constants';
+import { SonarGrid } from '@/components/ui/sonar-grid';
 
 export default function AuthPage() {
   const { login, register } = useAuth();
@@ -83,17 +84,38 @@ export default function AuthPage() {
   };
 
   return (
-    <div className="min-h-screen bg-zinc-950 flex flex-col justify-center items-center px-4 py-8 sm:px-6 lg:px-8 relative overflow-hidden font-sans select-none">
+    <SonarGrid
+      color="#C9FF55"
+      baseOpacity={0.16}
+      spacing={28}
+      dotRadius={1.3}
+      speed={220}
+      ringWidth={110}
+      amplitude={2.0}
+      pingEvery={3}
+      interactive={true}
+      className="min-h-screen bg-zinc-950 flex flex-col justify-center items-center px-4 py-8 sm:px-6 lg:px-8 relative overflow-hidden font-sans select-none"
+    >
       {/* Dynamic Background Glows */}
-      <div className="absolute top-[-15%] left-[-10%] w-[500px] h-[500px] bg-accent/10 rounded-full blur-[120px] pointer-events-none" />
-      <div className="absolute bottom-[-15%] right-[-10%] w-[500px] h-[500px] bg-indigo-500/10 rounded-full blur-[120px] pointer-events-none" />
+      <div className="absolute top-[-15%] left-[-10%] w-[500px] h-[500px] bg-accent/10 rounded-full blur-[140px] pointer-events-none" />
+      <div className="absolute bottom-[-15%] right-[-10%] w-[500px] h-[500px] bg-zinc-800/30 rounded-full blur-[140px] pointer-events-none" />
+
+      {/* Radial fade for crisp card focus */}
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-0 -z-10 bg-[radial-gradient(ellipse_60%_50%_at_50%_50%,rgba(10,10,10,0.75)_0%,transparent_100%)]"
+      />
 
       {/* Main Container */}
       <div className="w-full max-w-md relative z-10 space-y-6">
         {/* Branding Header */}
         <div className="text-center space-y-2">
-          <div className="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-gradient-to-tr from-accent/80 to-accent shadow-lg shadow-accent/20 mb-2">
-            <span className="text-accent-text font-black text-2xl">$</span>
+          <div className="inline-flex items-center justify-center w-14 h-14 rounded-2xl mb-2">
+            <img
+              src="/logo.webp"
+              alt={APP_NAME}
+              className="w-14 h-14 rounded-2xl object-cover shadow-xl shadow-accent/20 border border-zinc-800"
+            />
           </div>
           <h1 className="text-3xl font-bold tracking-tight text-white">{APP_NAME}</h1>
           <p className="text-sm text-zinc-400">
@@ -285,6 +307,6 @@ export default function AuthPage() {
           )}
         </p>
       </div>
-    </div>
+    </SonarGrid>
   );
 }

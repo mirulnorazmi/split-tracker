@@ -2,15 +2,50 @@ import { useState, useEffect, useCallback } from 'react';
 import { api, Expense, Category, Payment, User } from '@/lib/api';
 import { useAuth } from '@/app/AuthContext';
 
+// ── Fast In-Memory SWR Cache for Instant Page Transitions ─────────────────────
+const memoryCache = new Map<string, any>();
+let categoriesPromise: Promise<Category[]> | null = null;
+let prefetchPromise: Promise<void> | null = null;
+
+/**
+ * Prefetches key data upfront from App.tsx to bypass sequential module waterfalls.
+ */
+export async function prefetchAppData() {
+  if (prefetchPromise) return prefetchPromise;
+  prefetchPromise = (async () => {
+    try {
+      const [stats, recent, payments, expenses, categories] = await Promise.allSettled([
+        api.getDashboardStats(),
+        api.getDashboardRecent(),
+        api.listPayments(),
+        api.listExpenses(),
+        api.listCategories(),
+      ]);
+
+      if (stats.status === 'fulfilled') memoryCache.set('dashboard:stats', stats.value);
+      if (recent.status === 'fulfilled') memoryCache.set('dashboard:recent', recent.value);
+      if (payments.status === 'fulfilled') memoryCache.set('payments:{}', payments.value);
+      if (expenses.status === 'fulfilled') memoryCache.set('expenses:{}', expenses.value);
+      if (categories.status === 'fulfilled') memoryCache.set('categories', categories.value);
+    } catch {
+      // Silently continue
+    }
+  })();
+  return prefetchPromise;
+}
+
 /**
  * Hook for fetching dashboard stats and recent activity.
  */
 export function useDashboardData() {
   const { user } = useAuth();
-  const [stats, setStats] = useState<{ totalOwed: number; confirmedPayments: number; pendingPayments: number; currentBalance: number } | null>(null);
-  const [recentExpenses, setRecentExpenses] = useState<any[]>([]);
-  const [recentPayments, setRecentPayments] = useState<any[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const cachedStats = memoryCache.get('dashboard:stats') || null;
+  const cachedRecent = memoryCache.get('dashboard:recent') || null;
+
+  const [stats, setStats] = useState<{ totalOwed: number; confirmedPayments: number; pendingPayments: number; currentBalance: number } | null>(cachedStats);
+  const [recentExpenses, setRecentExpenses] = useState<any[]>(cachedRecent?.recentExpenses || []);
+  const [recentPayments, setRecentPayments] = useState<any[]>(cachedRecent?.recentPayments || []);
+  const [isLoading, setIsLoading] = useState(!cachedStats);
 
   const fetchData = useCallback(async () => {
     if (!user) return;
@@ -19,6 +54,8 @@ export function useDashboardData() {
         api.getDashboardStats(),
         api.getDashboardRecent(),
       ]);
+      memoryCache.set('dashboard:stats', s);
+      memoryCache.set('dashboard:recent', r);
       setStats(s);
       setRecentExpenses(r.recentExpenses);
       setRecentPayments(r.recentPayments);
@@ -48,20 +85,22 @@ export function useDashboardData() {
  */
 export function useExpenses(params?: { status?: string; creatorId?: string }) {
   const { user } = useAuth();
-  const [expenses, setExpenses] = useState<Expense[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const cacheKey = `expenses:${JSON.stringify(params || {})}`;
+  const [expenses, setExpenses] = useState<Expense[]>(() => memoryCache.get(cacheKey) || []);
+  const [isLoading, setIsLoading] = useState(() => !memoryCache.has(cacheKey));
 
   const fetchExpenses = useCallback(async () => {
     if (!user) return;
     try {
       const data = await api.listExpenses(params);
+      memoryCache.set(cacheKey, data);
       setExpenses(data);
     } catch {
-      setExpenses([]);
+      if (!memoryCache.has(cacheKey)) setExpenses([]);
     } finally {
       setIsLoading(false);
     }
-  }, [user, params?.status, params?.creatorId]);
+  }, [user, cacheKey]);
 
   useEffect(() => {
     fetchExpenses();
@@ -109,18 +148,31 @@ export function useExpense(id: string | null) {
 }
 
 /**
- * Hook for fetching categories.
+ * Hook for fetching categories with automatic session caching & request deduplication.
  */
 export function useCategories() {
-  const [categories, setCategories] = useState<Category[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const [categories, setCategories] = useState<Category[]>(() => memoryCache.get('categories') || []);
+  const [isLoading, setIsLoading] = useState(() => !memoryCache.has('categories'));
 
-  const fetchCategories = useCallback(async () => {
+  const fetchCategories = useCallback(async (force = false) => {
+    if (!force && memoryCache.has('categories')) {
+      setCategories(memoryCache.get('categories')!);
+      setIsLoading(false);
+      return;
+    }
+
+    if (!categoriesPromise) {
+      categoriesPromise = api.listCategories().finally(() => {
+        categoriesPromise = null;
+      });
+    }
+
     try {
-      const data = await api.listCategories();
+      const data = await categoriesPromise;
+      memoryCache.set('categories', data);
       setCategories(data);
     } catch {
-      setCategories([]);
+      if (!memoryCache.has('categories')) setCategories([]);
     } finally {
       setIsLoading(false);
     }
@@ -130,7 +182,7 @@ export function useCategories() {
     fetchCategories();
   }, [fetchCategories]);
 
-  return { categories, isLoading, refetch: fetchCategories };
+  return { categories, isLoading, refetch: () => fetchCategories(true) };
 }
 
 /**
@@ -138,20 +190,22 @@ export function useCategories() {
  */
 export function usePayments(params?: { status?: string; payerId?: string; payeeId?: string; expenseId?: string }) {
   const { user } = useAuth();
-  const [payments, setPayments] = useState<Payment[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const cacheKey = `payments:${JSON.stringify(params || {})}`;
+  const [payments, setPayments] = useState<Payment[]>(() => memoryCache.get(cacheKey) || []);
+  const [isLoading, setIsLoading] = useState(() => !memoryCache.has(cacheKey));
 
   const fetchPayments = useCallback(async () => {
     if (!user) return;
     try {
       const data = await api.listPayments(params);
+      memoryCache.set(cacheKey, data);
       setPayments(data);
     } catch {
-      setPayments([]);
+      if (!memoryCache.has(cacheKey)) setPayments([]);
     } finally {
       setIsLoading(false);
     }
-  }, [user, params?.status, params?.payerId, params?.payeeId, params?.expenseId]);
+  }, [user, cacheKey]);
 
   useEffect(() => {
     fetchPayments();
@@ -172,20 +226,22 @@ export function usePayments(params?: { status?: string; payerId?: string; payeeI
  */
 export function useUsers(params?: { status?: string; role?: string }) {
   const { user } = useAuth();
-  const [users, setUsers] = useState<User[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const cacheKey = `users:${JSON.stringify(params || {})}`;
+  const [users, setUsers] = useState<User[]>(() => memoryCache.get(cacheKey) || []);
+  const [isLoading, setIsLoading] = useState(() => !memoryCache.has(cacheKey));
 
   const fetchUsers = useCallback(async () => {
     if (!user) { setUsers([]); setIsLoading(false); return; }
     try {
       const data = await api.listUsers(params);
+      memoryCache.set(cacheKey, data);
       setUsers(data);
     } catch {
-      setUsers([]);
+      if (!memoryCache.has(cacheKey)) setUsers([]);
     } finally {
       setIsLoading(false);
     }
-  }, [user, params?.status, params?.role]);
+  }, [user, cacheKey]);
 
   useEffect(() => {
     fetchUsers();
@@ -199,4 +255,43 @@ export function useUsers(params?: { status?: string; role?: string }) {
   }, [fetchUsers]);
 
   return { users, isLoading, refetch: fetchUsers };
+}
+
+/**
+ * Lightweight hook for fetching admin pending counts for badge display.
+ * Only executes network requests if the user is an Admin.
+ */
+export function useAdminPendingCounts() {
+  const { user } = useAuth();
+  const isAdmin = user?.role === 'Admin';
+  const [counts, setCounts] = useState<{ pendingApprovals: number; pendingUsers: number }>({
+    pendingApprovals: 0,
+    pendingUsers: 0,
+  });
+
+  const fetchCounts = useCallback(async () => {
+    if (!isAdmin) return;
+    try {
+      const data = await api.getAdminPendingCounts();
+      setCounts(data);
+    } catch {
+      // ignore
+    }
+  }, [isAdmin]);
+
+  useEffect(() => {
+    if (!isAdmin) return;
+    fetchCounts();
+    const interval = setInterval(fetchCounts, 15000);
+    const handleRefresh = () => { fetchCounts(); };
+    window.addEventListener('splittrack:data-changed', handleRefresh);
+    window.addEventListener('focus', handleRefresh);
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('splittrack:data-changed', handleRefresh);
+      window.removeEventListener('focus', handleRefresh);
+    };
+  }, [isAdmin, fetchCounts]);
+
+  return { ...counts, refetch: fetchCounts };
 }

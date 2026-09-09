@@ -1,8 +1,8 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useExpenses, usePayments, useUsers } from '@/lib/hooks/useData';
 import { api } from '@/lib/api';
-import { Check, CreditCard, FileText } from 'lucide-react';
+import { Check, CreditCard, FileText, ChevronLeft, ChevronRight } from 'lucide-react';
 import { cn } from '@/lib/utils/cn';
 
 export default function Approvals() {
@@ -13,6 +13,18 @@ export default function Approvals() {
   const { users } = useUsers();
   const [actionLoadingId, setActionLoadingId] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  
+  const [page, setPage] = useState(1);
+  const ITEMS_PER_PAGE = 10;
+  
+  useEffect(() => {
+    setPage(1);
+  }, [activeTab]);
+  
+  const currentList = activeTab === 'expenses' ? pendingExpenses : pendingPayments;
+  const totalPages = Math.ceil(currentList.length / ITEMS_PER_PAGE);
+  const paginatedExpenses = pendingExpenses.slice((page - 1) * ITEMS_PER_PAGE, page * ITEMS_PER_PAGE);
+  const paginatedPayments = pendingPayments.slice((page - 1) * ITEMS_PER_PAGE, page * ITEMS_PER_PAGE);
 
   const handleApproveExpense = async (id: string) => {
     setActionLoadingId(id);
@@ -52,6 +64,7 @@ export default function Approvals() {
       return dateStr;
     }
   };
+
 
   return (
     <div className="max-w-6xl mx-auto space-y-6 sm:space-y-8 animate-in fade-in duration-500 pb-20">
@@ -102,7 +115,7 @@ export default function Approvals() {
             ) : pendingExpenses.length === 0 ? (
               <div className="text-center py-12 text-zinc-500">No pending expenses to approve.</div>
             ) : (
-              pendingExpenses.map((expense) => {
+              paginatedExpenses.map((expense) => {
                 const creator = users.find((u) => u.id === expense.creatorId);
                 const numParticipants = expense.participants?.length || 0;
                 const isActing = actionLoadingId === expense.id;
@@ -155,7 +168,7 @@ export default function Approvals() {
             ) : pendingPayments.length === 0 ? (
               <div className="text-center py-12 text-zinc-500">No pending payments to approve.</div>
             ) : (
-              pendingPayments.map((payment) => {
+              paginatedPayments.map((payment) => {
                 const payer = users.find((u) => u.id === payment.payerId);
                 const payee = users.find((u) => u.id === payment.payeeId);
                 const isActing = actionLoadingId === payment.id;
@@ -199,6 +212,36 @@ export default function Approvals() {
                 );
               })
             )}
+          </div>
+        )}
+        
+        {/* Pagination Controls */}
+        {totalPages >= 1 && (
+          <div className="flex items-center justify-between p-4 border-t border-zinc-800/50">
+            <div className="text-xs sm:text-sm text-zinc-500">
+              Showing <span className="text-zinc-300 font-medium">{(page - 1) * ITEMS_PER_PAGE + 1}</span> to{' '}
+              <span className="text-zinc-300 font-medium">{Math.min(page * ITEMS_PER_PAGE, currentList.length)}</span> of{' '}
+              <span className="text-zinc-300 font-medium">{currentList.length}</span> results
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+                disabled={page === 1}
+                className="p-1.5 sm:p-2 rounded-lg border border-zinc-800 text-zinc-400 hover:text-white hover:bg-zinc-800 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              >
+                <ChevronLeft className="w-4 h-4" />
+              </button>
+              <div className="text-sm font-medium text-zinc-300 px-2 sm:px-4">
+                Page {page} of {totalPages}
+              </div>
+              <button
+                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                disabled={page === totalPages}
+                className="p-1.5 sm:p-2 rounded-lg border border-zinc-800 text-zinc-400 hover:text-white hover:bg-zinc-800 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              >
+                <ChevronRight className="w-4 h-4" />
+              </button>
+            </div>
           </div>
         )}
       </div>

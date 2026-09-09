@@ -12,3 +12,4 @@ coverage/
 !k8s/**/*.env.example
 k8s/overlays/**/*.env
 k8s/secret.yaml
+scratch

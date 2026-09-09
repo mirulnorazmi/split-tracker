@@ -9,10 +9,9 @@ export default async function dashboardRoutes(fastify: FastifyInstance) {
   fastify.get('/dashboard/stats', { preHandler: [fastify.authenticate] }, async (request: FastifyRequest, reply: FastifyReply) => {
     const { id: userId } = request.user as { id: string };
 
-    // Total owed by user — excludes expenses where the user is the host/creator,
-    // because the host already paid the full bill upfront and their share is auto-waived.
+    // 1. Total all-time one-off expense share assigned to user (excluding when user is host/creator)
     const { rows: [owedRow] } = await query(
-      `SELECT COALESCE(SUM(ep.amount_owed), 0) AS "totalOwed"
+      `SELECT COALESCE(SUM(ep.amount_owed), 0) AS "expenseOwed"
        FROM expense_participant ep
        JOIN expense e ON e.id = ep.expense_id
        WHERE ep.user_id = $1
@@ -21,7 +20,53 @@ export default async function dashboardRoutes(fastify: FastifyInstance) {
       [userId]
     );
 
-    // Confirmed payments made by user
+    // 2. Total all-time recurring subscription share assigned to user (all active cycles up to current month, excluding when user is host/creator)
+    const { rows: [recOwedRow] } = await query(
+      `SELECT COALESCE(SUM(rci.amount_due), 0) AS "recurringOwed"
+       FROM recurring_cycle_item rci
+       JOIN recurring_cycle rc ON rc.id = rci.cycle_id
+       JOIN recurring_expense re ON re.id = rc.recurring_expense_id
+       WHERE rci.user_id = $1
+         AND re.creator_id != rci.user_id
+         AND rci.status IN ('Paid', 'Pending', 'Unpaid')
+         AND rc.period_key <= TO_CHAR(NOW(), 'YYYY-MM')`,
+      [userId]
+    );
+
+    // 3. Current unpaid balance for one-off expenses (calculated per expense minus confirmed payments applied)
+    const { rows: [unpaidExpenseRow] } = await query(
+      `SELECT COALESCE(SUM(
+         GREATEST(0, ep.amount_owed - COALESCE(ep_paid.paid, 0))
+       ), 0) AS "expenseBalanceDue"
+       FROM expense_participant ep
+       JOIN expense e ON e.id = ep.expense_id
+       LEFT JOIN (
+         SELECT epm.expense_id, SUM(epm.amount_applied) AS paid
+         FROM expense_payment epm
+         JOIN payment p ON p.id = epm.payment_id
+         WHERE p.payer_id = $1 AND p.status = 'Confirmed'
+         GROUP BY epm.expense_id
+       ) ep_paid ON ep_paid.expense_id = ep.expense_id
+       WHERE ep.user_id = $1
+         AND e.status = 'Confirmed'
+         AND e.creator_id != ep.user_id`,
+      [userId]
+    );
+
+    // 4. Current unpaid balance for recurring subscription cycles (due up to current month)
+    const { rows: [unpaidRecRow] } = await query(
+      `SELECT COALESCE(SUM(rci.amount_due), 0) AS "recurringBalanceDue"
+       FROM recurring_cycle_item rci
+       JOIN recurring_cycle rc ON rc.id = rci.cycle_id
+       JOIN recurring_expense re ON re.id = rc.recurring_expense_id
+       WHERE rci.user_id = $1
+         AND rci.status IN ('Unpaid', 'Pending')
+         AND re.creator_id != rci.user_id
+         AND rc.period_key <= TO_CHAR(NOW(), 'YYYY-MM')`,
+      [userId]
+    );
+
+    // 5. Confirmed payments made by user
     const { rows: [confirmedRow] } = await query(
       `SELECT COALESCE(SUM(amount), 0) AS "confirmedPayments"
        FROM payment
@@ -29,7 +74,7 @@ export default async function dashboardRoutes(fastify: FastifyInstance) {
       [userId]
     );
 
-    // Pending payments made by user
+    // 6. Pending payments made by user
     const { rows: [pendingRow] } = await query(
       `SELECT COALESCE(SUM(amount), 0) AS "pendingPayments"
        FROM payment
@@ -37,16 +82,63 @@ export default async function dashboardRoutes(fastify: FastifyInstance) {
       [userId]
     );
 
-    const totalOwed = parseFloat(owedRow.totalOwed);
+    // 7. Total uncollected from one-off expenses created by user (what other participants owe)
+    const { rows: [uncollectedRow] } = await query(
+      `SELECT COALESCE(SUM(ep.amount_owed), 0) AS "totalUncollected"
+       FROM expense_participant ep
+       JOIN expense e ON e.id = ep.expense_id
+       WHERE e.creator_id = $1
+         AND e.status = 'Confirmed'
+         AND ep.user_id != e.creator_id`,
+      [userId]
+    );
+
+    // 8. Total uncollected from recurring expenses created by user (up to current month)
+    const { rows: [recUncollectedRow] } = await query(
+      `SELECT COALESCE(SUM(rci.amount_due), 0) AS "recUncollected"
+       FROM recurring_cycle_item rci
+       JOIN recurring_cycle rc ON rc.id = rci.cycle_id
+       JOIN recurring_expense re ON re.id = rc.recurring_expense_id
+       WHERE re.creator_id = $1
+         AND rci.user_id != re.creator_id
+         AND rci.status IN ('Paid', 'Pending', 'Unpaid')
+         AND rc.period_key <= TO_CHAR(NOW(), 'YYYY-MM')`,
+      [userId]
+    );
+
+    // 9. Total collected — confirmed payments received by the current user as payee
+    const { rows: [collectedRow] } = await query(
+      `SELECT COALESCE(SUM(amount), 0) AS "totalCollected"
+       FROM payment
+       WHERE payee_id = $1 AND status = 'Confirmed'`,
+      [userId]
+    );
+
+    const expenseOwed = parseFloat(owedRow?.expenseOwed || '0');
+    const recurringOwed = parseFloat(recOwedRow?.recurringOwed || '0');
+    const totalOwed = expenseOwed + recurringOwed;
+
+    const expenseBalanceDue = parseFloat(unpaidExpenseRow?.expenseBalanceDue || '0');
+    const recurringBalanceDue = parseFloat(unpaidRecRow?.recurringBalanceDue || '0');
+    const currentBalance = expenseBalanceDue + recurringBalanceDue;
+
     const confirmedPayments = parseFloat(confirmedRow.confirmedPayments);
     const pendingPayments = parseFloat(pendingRow.pendingPayments);
-    const currentBalance = totalOwed - confirmedPayments;
+
+    const totalUncollected = parseFloat(uncollectedRow?.totalUncollected || '0') + parseFloat(recUncollectedRow?.recUncollected || '0');
+    const totalCollected = parseFloat(collectedRow?.totalCollected || '0');
+    const outstandingFromOthers = totalUncollected - totalCollected;
 
     return reply.send({
       totalOwed,
+      expenseOwed,
+      recurringOwed,
       confirmedPayments,
       pendingPayments,
       currentBalance: Math.max(0, currentBalance),
+      totalUncollected,
+      totalCollected,
+      outstandingFromOthers: Math.max(0, outstandingFromOthers),
     });
   });
 
@@ -67,8 +159,8 @@ export default async function dashboardRoutes(fastify: FastifyInstance) {
        JOIN category c ON c.id = e.category_id
        JOIN expense_participant ep ON ep.expense_id = e.id AND ep.user_id = $1
        WHERE (e.status = 'Confirmed' OR e.creator_id = $1)
-       ORDER BY e.date DESC
-       LIMIT 5`,
+       ORDER BY e.date DESC, e.created_at DESC
+       LIMIT 50`,
       [userId]
     );
 
@@ -78,11 +170,33 @@ export default async function dashboardRoutes(fastify: FastifyInstance) {
        FROM payment p
        JOIN "user" payee ON payee.id = p.payee_id
        WHERE p.payer_id = $1
-       ORDER BY p.date DESC
-       LIMIT 5`,
+       ORDER BY p.date DESC, p.created_at DESC
+       LIMIT 50`,
       [userId]
     );
 
     return reply.send({ recentExpenses, recentPayments });
+  });
+
+  /**
+   * GET /admin/pending-counts
+   * Authenticated — returns lightweight pending counts for admin badges without downloading full records
+   */
+  fastify.get('/admin/pending-counts', { preHandler: [fastify.authenticate] }, async (request: FastifyRequest, reply: FastifyReply) => {
+    const { role } = request.user as { role: string };
+    if (role !== 'Admin') {
+      return reply.send({ pendingApprovals: 0, pendingUsers: 0 });
+    }
+
+    const { rows: [counts] } = await query(
+      `SELECT
+         (
+           (SELECT COUNT(*)::int FROM expense WHERE status = 'Pending') +
+           (SELECT COUNT(*)::int FROM payment WHERE status = 'Pending')
+         ) AS "pendingApprovals",
+         (SELECT COUNT(*)::int FROM "user" WHERE status = 'Pending') AS "pendingUsers"`
+    );
+
+    return reply.send(counts || { pendingApprovals: 0, pendingUsers: 0 });
   });
 }

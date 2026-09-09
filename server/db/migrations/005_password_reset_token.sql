@@ -1,0 +1,2 @@
+ALTER TABLE "user" ADD COLUMN IF NOT EXISTS password_reset_token VARCHAR(255);
+ALTER TABLE "user" ADD COLUMN IF NOT EXISTS password_reset_expires TIMESTAMPTZ;

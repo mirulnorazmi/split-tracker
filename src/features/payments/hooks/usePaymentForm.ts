@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '@/app/AuthContext';
 import { useExpenses, usePayments } from '@/lib/hooks/useData';
-import { getUserRemainingShare, hasUserFullyPaid } from '@/lib/utils/expense';
+import { getUserRemainingShare, hasUserFullyPaid, hasUserPendingOrPaid } from '@/lib/utils/expense';
 
 /**
  * Custom hook for the NewPayment page.
@@ -16,7 +16,7 @@ export function usePaymentForm() {
 
   const currentUserId = currentUser?.id || '';
 
-  // Only include expenses where current user owes money (participant, not creator, and NOT fully paid)
+  // Only include expenses where current user owes money (participant, not creator, and NOT fully paid or pending)
   const userExpenses = expenses.filter((exp: any) => {
     if (exp.creatorId === currentUserId) return false;
     if (!exp.participants || !Array.isArray(exp.participants)) return false;
@@ -25,14 +25,14 @@ export function usePaymentForm() {
     );
     if (!isPart) return false;
 
-    // Check if user has already fully paid
-    return !hasUserFullyPaid(exp, currentUserId, payments);
+    // Check if user has already fully paid or has a pending payment covering their share
+    return !hasUserPendingOrPaid(exp, currentUserId, payments);
   });
 
-  // Calculate the remaining unpaid total for selected expenses
+  // Calculate the remaining unpaid total for selected expenses (accounting for any pending payments)
   const calculatedTotal = userExpenses
     .filter((exp) => selectedExpenses.includes(exp.id))
-    .reduce((acc, exp) => acc + getUserRemainingShare(exp, currentUserId, payments), 0);
+    .reduce((acc, exp) => acc + getUserRemainingShare(exp, currentUserId, payments, true), 0);
 
   useEffect(() => {
     if (selectedExpenses.length > 0) {

@@ -18,7 +18,7 @@ export default async function expenseRoutes(fastify: FastifyInstance) {
    * Authenticated — create a new expense (status: Pending)
    */
   fastify.post('/expenses', { preHandler: [fastify.authenticate] }, async (request: FastifyRequest, reply: FastifyReply) => {
-    const { id: creatorId } = request.user as { id: string };
+    const { role, id: creatorId } = request.user as { role: string; id: string };
     const { title, totalAmount, categoryId, participants } = request.body as CreateExpenseBody;
 
     if (!title || !totalAmount || !categoryId || !participants || participants.length === 0) {
@@ -31,25 +31,29 @@ export default async function expenseRoutes(fastify: FastifyInstance) {
       return reply.status(400).send({ error: 'Bad Request', message: 'Sum of participant amounts must equal totalAmount' });
     }
 
-    const client = await query('BEGIN');
+    // Admin-created expenses are auto-confirmed
+    const status = role === 'Admin' ? 'Confirmed' : 'Pending';
+
+    const client = await getClient();
     try {
-      const { rows: [expense] } = await query(
+      await client.query('BEGIN');
+      const { rows: [expense] } = await client.query(
         `INSERT INTO expense (title, total_amount, category_id, creator_id, status)
-         VALUES ($1, $2, $3, $4, 'Pending')
+         VALUES ($1, $2, $3, $4, $5)
          RETURNING id, title, total_amount, date, category_id, creator_id, status, created_at`,
-        [title, totalAmount, categoryId, creatorId]
+        [title, totalAmount, categoryId, creatorId, status]
       );
 
       for (const p of participants) {
-        await query(
+        await client.query(
           `INSERT INTO expense_participant (expense_id, user_id, amount_owed) VALUES ($1, $2, $3)`,
           [expense.id, p.userId, p.amountOwed]
         );
       }
 
-      await query('COMMIT');
+      await client.query('COMMIT');
 
-      const { rows: [full] } = await query(
+      const { rows: [full] } = await client.query(
         `SELECT e.*, COALESCE(json_agg(json_build_object('userId', ep.user_id, 'amountOwed', ep.amount_owed)) FILTER (WHERE ep.user_id IS NOT NULL), '[]') AS participants
          FROM expense e
          LEFT JOIN expense_participant ep ON ep.expense_id = e.id
@@ -60,8 +64,10 @@ export default async function expenseRoutes(fastify: FastifyInstance) {
 
       return reply.status(201).send(full);
     } catch (err) {
-      await query('ROLLBACK');
+      await client.query('ROLLBACK');
       throw err;
+    } finally {
+      client.release();
     }
   });
 
@@ -258,4 +264,28 @@ export default async function expenseRoutes(fastify: FastifyInstance) {
   fastify.get('/expenses/:id/status', { preHandler: [fastify.authenticate] }, handleUpdateExpenseStatus);
   fastify.patch('/expenses/:id/approve', { preHandler: [fastify.authenticate] }, handleUpdateExpenseStatus);
   fastify.post('/expenses/:id/approve', { preHandler: [fastify.authenticate] }, handleUpdateExpenseStatus);
+
+  /**
+   * DELETE /expenses/:id
+   * Delete an expense (Admin only)
+   */
+  fastify.delete('/expenses/:id', { preHandler: [fastify.authenticate] }, async (request: FastifyRequest, reply: FastifyReply) => {
+    const { role } = request.user as { role: string; id: string };
+    if (role !== 'Admin') {
+      return reply.status(403).send({ error: 'Forbidden', message: 'Only administrators can delete expenses' });
+    }
+
+    const { id } = request.params as { id: string };
+
+    const { rows } = await query(
+      'DELETE FROM expense WHERE id = $1 RETURNING id, title',
+      [id]
+    );
+
+    if (rows.length === 0) {
+      return reply.status(404).send({ error: 'Not Found', message: 'Expense not found' });
+    }
+
+    return reply.send({ message: 'Expense deleted successfully', id, title: rows[0].title });
+  });
 }

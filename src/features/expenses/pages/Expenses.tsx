@@ -1,9 +1,10 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import { ArrowRight, Plus, Search, X } from 'lucide-react';
+import { ArrowRight, Plus, Search, X, Trash2, ChevronLeft, ChevronRight } from 'lucide-react';
 import { useAuth } from '@/app/AuthContext';
 import { useExpenses, usePayments, useCategories, useUsers } from '@/lib/hooks/useData';
-import { isExpenseClosed, getUserShare, getUserPaidAmount, getUserRemainingShare } from '@/lib/utils/expense';
+import { isExpenseClosed, getUserShare, getUserPaidAmount, getUserPendingAmount, getUserRemainingShare } from '@/lib/utils/expense';
+import { api } from '@/lib/api';
 
 function getTitleInitials(title: string): string {
   if (!title) return 'EX';
@@ -19,7 +20,7 @@ function getTitleInitials(title: string): string {
 export default function Expenses() {
   const navigate = useNavigate();
   const { user: currentUser } = useAuth();
-  const { expenses, isLoading: expensesLoading } = useExpenses();
+  const { expenses, isLoading: expensesLoading, refetch: refetchExpenses } = useExpenses();
   const { payments } = usePayments();
   const { categories } = useCategories();
   const { users } = useUsers();
@@ -27,10 +28,28 @@ export default function Expenses() {
   const [listTab, setListTab] = useState<'all' | 'created'>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'open' | 'closed'>('all');
+  
+  const [page, setPage] = useState(1);
+  const ITEMS_PER_PAGE = 10;
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
 
   const currentUserId = currentUser?.id || '';
+  const isAdmin = currentUser?.role === 'Admin';
+
+  const handleDeleteExpense = async (e: React.MouseEvent, id: string, title: string) => {
+    e.stopPropagation();
+    if (!window.confirm(`Are you sure you want to delete "${title}"? All associated participant records will be permanently removed.`)) {
+      return;
+    }
+    try {
+      await api.deleteExpense(id);
+      window.dispatchEvent(new Event('splittrack:data-changed'));
+      refetchExpenses();
+    } catch (err: any) {
+      alert(err?.message || 'Failed to delete expense');
+    }
+  };
 
   const isParticipant = (exp: any, uid: string) => {
     if (!exp.participants || !Array.isArray(exp.participants)) return false;
@@ -71,7 +90,14 @@ export default function Expenses() {
     }
   };
 
+  useEffect(() => {
+    setPage(1);
+  }, [listTab, searchQuery, statusFilter, startDate, endDate]);
+
   const hasActiveFilters = Boolean(searchQuery || statusFilter !== 'all' || startDate || endDate);
+  
+  const totalPages = Math.ceil(filteredExpenses.length / ITEMS_PER_PAGE);
+  const paginatedExpenses = filteredExpenses.slice((page - 1) * ITEMS_PER_PAGE, page * ITEMS_PER_PAGE);
 
   return (
     <div className="max-w-5xl mx-auto space-y-6 sm:space-y-8 animate-in fade-in duration-500">
@@ -179,14 +205,16 @@ export default function Expenses() {
               No sessions found matching your filters.
             </div>
           ) : (
-            filteredExpenses.map((expense) => {
+            paginatedExpenses.map((expense) => {
               const category = categories.find((c) => c.id === expense.categoryId);
               const numParticipants = expense.participants?.length || 1;
               const totalShare = getUserShare(expense, currentUserId);
               const remaining = getUserRemainingShare(expense, currentUserId, payments);
               const paid = getUserPaidAmount(expense, currentUserId, payments);
+              const pending = getUserPendingAmount(expense, currentUserId, payments);
               const isCreator = expense.creatorId === currentUserId;
               const isSettled = !isCreator && remaining <= 0;
+              const isPending = !isCreator && !isSettled && pending > 0;
               const expenseUsers = users.filter((u) => isParticipant(expense, u.id));
 
               return (
@@ -205,6 +233,11 @@ export default function Expenses() {
                         {isSettled && (
                           <span className="text-[10px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2 py-0.5 rounded-full font-semibold">
                             Settled
+                          </span>
+                        )}
+                        {isPending && (
+                          <span className="text-[10px] bg-amber-500/10 text-amber-400 border border-amber-500/20 px-2 py-0.5 rounded-full font-semibold">
+                            Pending
                           </span>
                         )}
                         {isCreator && (
@@ -270,6 +303,16 @@ export default function Expenses() {
                         </div>
                       )}
                     </div>
+                    {isAdmin && (
+                      <button
+                        type="button"
+                        onClick={(e) => handleDeleteExpense(e, expense.id, expense.title)}
+                        title="Delete expense (Admin only)"
+                        className="p-1.5 sm:p-2 rounded-lg text-zinc-500 hover:text-red-400 hover:bg-red-500/10 border border-transparent hover:border-red-500/20 transition-colors cursor-pointer"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    )}
                     <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-full border border-zinc-800 flex items-center justify-center text-zinc-400 group-hover:text-white group-hover:bg-zinc-800 transition-colors">
                       <ArrowRight className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
                     </div>
@@ -279,6 +322,36 @@ export default function Expenses() {
             })
           )}
         </div>
+        
+        {/* Pagination Controls */}
+        {totalPages >= 1 && (
+          <div className="flex items-center justify-between mt-6 pt-6 border-t border-zinc-800/50">
+            <div className="text-xs sm:text-sm text-zinc-500">
+              Showing <span className="text-zinc-300 font-medium">{(page - 1) * ITEMS_PER_PAGE + 1}</span> to{' '}
+              <span className="text-zinc-300 font-medium">{Math.min(page * ITEMS_PER_PAGE, filteredExpenses.length)}</span> of{' '}
+              <span className="text-zinc-300 font-medium">{filteredExpenses.length}</span> results
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+                disabled={page === 1}
+                className="p-1 sm:p-2 rounded-lg border border-zinc-800 text-zinc-400 hover:text-white hover:bg-zinc-800 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              >
+                <ChevronLeft className="w-4 h-4" />
+              </button>
+              <div className="text-sm font-medium text-zinc-300 px-2 sm:px-4">
+                Page {page} of {totalPages}
+              </div>
+              <button
+                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                disabled={page === totalPages}
+                className="p-1 sm:p-2 rounded-lg border border-zinc-800 text-zinc-400 hover:text-white hover:bg-zinc-800 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              >
+                <ChevronRight className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

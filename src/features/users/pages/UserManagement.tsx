@@ -1,19 +1,28 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useUsers } from '@/lib/hooks/useData';
 import { api } from '@/lib/api';
-import { Search, MoreVertical, Key, Shield, User, Check } from 'lucide-react';
+import { Search, MoreVertical, Key, Shield, User, Check, ChevronLeft, ChevronRight } from 'lucide-react';
 
 export default function UserManagement() {
   const [searchQuery, setSearchQuery] = useState('');
   const { users, refetch, isLoading } = useUsers();
   const [actingId, setActingId] = useState<string | null>(null);
   const [feedbackMessage, setFeedbackMessage] = useState<string | null>(null);
+  const [page, setPage] = useState(1);
+  const ITEMS_PER_PAGE = 10;
 
   const filteredUsers = users.filter(
     (user) =>
       user.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
       (user.email && user.email.toLowerCase().includes(searchQuery.toLowerCase()))
   );
+
+  useEffect(() => {
+    setPage(1);
+  }, [searchQuery]);
+
+  const totalPages = Math.ceil(filteredUsers.length / ITEMS_PER_PAGE);
+  const paginatedUsers = filteredUsers.slice((page - 1) * ITEMS_PER_PAGE, page * ITEMS_PER_PAGE);
 
   const handleApprove = async (id: string) => {
     setActingId(id);
@@ -52,6 +61,7 @@ export default function UserManagement() {
       setActingId(null);
     }
   };
+
 
   return (
     <div className="max-w-6xl mx-auto space-y-6 sm:space-y-8 animate-in fade-in duration-500 pb-20">
@@ -109,7 +119,7 @@ export default function UserManagement() {
                   </td>
                 </tr>
               ) : (
-                filteredUsers.map((user) => (
+                paginatedUsers.map((user) => (
                   <tr key={user.id} className="hover:bg-zinc-900/30 transition-colors group">
                     <td className="px-6 py-4">
                       <div className="flex items-center gap-3">
@@ -165,9 +175,6 @@ export default function UserManagement() {
                         >
                           <Key className="w-4 h-4" />
                         </button>
-                        <button className="p-2 rounded-lg text-zinc-500 hover:text-white transition-colors">
-                          <MoreVertical className="w-4 h-4" />
-                        </button>
                       </div>
                     </td>
                   </tr>
@@ -186,7 +193,7 @@ export default function UserManagement() {
               No users found matching "{searchQuery}"
             </div>
           ) : (
-            filteredUsers.map((user) => (
+            paginatedUsers.map((user) => (
               <div key={user.id} className="p-4 space-y-3">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-3">
@@ -240,15 +247,42 @@ export default function UserManagement() {
                     >
                       <Key className="w-4 h-4" />
                     </button>
-                    <button className="p-2 rounded-lg text-zinc-500 hover:text-white transition-colors">
-                      <MoreVertical className="w-4 h-4" />
-                    </button>
                   </div>
                 </div>
               </div>
             ))
           )}
         </div>
+        
+        {/* Pagination Controls */}
+        {!isLoading && totalPages >= 1 && (
+          <div className="flex items-center justify-between p-4 border-t border-zinc-800/50">
+            <div className="text-xs sm:text-sm text-zinc-500">
+              Showing <span className="text-zinc-300 font-medium">{(page - 1) * ITEMS_PER_PAGE + 1}</span> to{' '}
+              <span className="text-zinc-300 font-medium">{Math.min(page * ITEMS_PER_PAGE, filteredUsers.length)}</span> of{' '}
+              <span className="text-zinc-300 font-medium">{filteredUsers.length}</span> results
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+                disabled={page === 1}
+                className="p-1.5 rounded-lg border border-zinc-800 text-zinc-400 hover:text-white hover:bg-zinc-800 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              >
+                <ChevronLeft className="w-4 h-4" />
+              </button>
+              <div className="text-sm font-medium text-zinc-300 px-4">
+                Page {page} of {totalPages}
+              </div>
+              <button
+                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                disabled={page === totalPages}
+                className="p-1.5 rounded-lg border border-zinc-800 text-zinc-400 hover:text-white hover:bg-zinc-800 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              >
+                <ChevronRight className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

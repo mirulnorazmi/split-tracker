@@ -38,8 +38,13 @@ export type Payment = {
   confirmedByName?: string;
   amount: number;
   payerId: string;
+  payerName?: string;
   payeeId?: string;
+  payeeName?: string;
   expenseIds?: string[];
   isPartial?: boolean;
   status: 'Pending' | 'Confirmed';
+  expensesApplied?: { expenseId: string; amountApplied: number }[];
+  recurringItemsApplied?: { cycleItemId: string; amountApplied: number; title?: string; periodKey?: string }[];
 };
+

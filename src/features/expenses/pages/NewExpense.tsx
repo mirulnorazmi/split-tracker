@@ -83,13 +83,20 @@ export default function NewExpense() {
   };
 
   if (step === 'success') {
+    const isAdmin = currentUser?.role === 'Admin';
     return (
       <SuccessScreen
-        title="Request Submitted"
+        title={isAdmin ? 'Expense Recorded' : 'Request Submitted'}
         message={
-          <>
-            Your expense request for <span className="font-semibold text-white">{form.title}</span> has been submitted and is pending admin approval.
-          </>
+          isAdmin ? (
+            <>
+              Your expense for <span className="font-semibold text-white">{form.title}</span> has been recorded and is now active.
+            </>
+          ) : (
+            <>
+              Your expense request for <span className="font-semibold text-white">{form.title}</span> has been submitted and is pending admin approval.
+            </>
+          )
         }
         countdown={countdown}
       />

@@ -124,7 +124,7 @@ export default async function avatarRoutes(fastify: FastifyInstance) {
         const stream = await minioClient.getObject(BUCKET, key);
 
         reply.header('Content-Type', stat.metaData?.['content-type'] || 'image/jpeg');
-        reply.header('Cache-Control', 'public, max-age=86400');
+        reply.header('Cache-Control', 'public, max-age=31536000, immutable');
         return reply.send(stream);
       } catch {
         // Try next candidate key

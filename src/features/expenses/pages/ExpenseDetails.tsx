@@ -1,10 +1,10 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Edit2, Check, X, CreditCard, Calendar, User, ChevronRight, Clock } from 'lucide-react';
+import { ArrowLeft, Edit2, Check, X, CreditCard, Calendar, User, ChevronRight, Clock, Trash2 } from 'lucide-react';
 import { useAuth } from '@/app/AuthContext';
 import { useExpense, useCategories, useUsers, usePayments } from '@/lib/hooks/useData';
 import { api } from '@/lib/api';
-import { getUserShare, getUserPaidAmount, getUserRemainingShare } from '@/lib/utils/expense';
+import { getUserShare, getUserPaidAmount, getUserPendingAmount, getUserRemainingShare } from '@/lib/utils/expense';
 import { cn } from '@/lib/utils/cn';
 import { useExpenseForm } from '@/features/expenses/hooks/useExpenseForm';
 import { ParticipantPicker, SuccessScreen, BackButton } from '@/components';
@@ -135,6 +135,25 @@ export default function ExpenseDetails({ expenseId: propExpenseId, onBack }: Exp
     } catch (err) {
       console.error('Failed to approve expense:', err);
     } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const isAdmin = currentUser?.role === 'Admin';
+
+  const handleDeleteExpense = async () => {
+    if (!expense) return;
+    if (!window.confirm(`Are you sure you want to delete "${expense.title}"? All associated participant records will be permanently removed.`)) {
+      return;
+    }
+    setActionLoading(true);
+    try {
+      await api.deleteExpense(expense.id);
+      window.dispatchEvent(new Event('splittrack:data-changed'));
+      if (onBack) onBack();
+      else navigate('/expenses');
+    } catch (err: any) {
+      alert(err?.message || 'Failed to delete expense');
       setActionLoading(false);
     }
   };
@@ -384,14 +403,25 @@ export default function ExpenseDetails({ expenseId: propExpenseId, onBack }: Exp
     <div className="max-w-3xl mx-auto space-y-6 sm:space-y-8 animate-in fade-in duration-500 pb-20">
       <div className="flex items-center justify-between">
         <BackButton fallbackPath="/expenses" label="Expenses" onClick={onBack} />
-        {isHost && (
-          <button
-            onClick={handleStartEdit}
-            className="flex items-center gap-2 text-sm bg-zinc-800 hover:bg-zinc-700 text-white px-3 sm:px-4 py-2 rounded-full transition-colors font-medium cursor-pointer"
-          >
-            <Edit2 className="w-4 h-4" /> Edit details
-          </button>
-        )}
+        <div className="flex items-center gap-2">
+          {isHost && (
+            <button
+              onClick={handleStartEdit}
+              className="flex items-center gap-2 text-sm bg-zinc-800 hover:bg-zinc-700 text-white px-3 sm:px-4 py-2 rounded-full transition-colors font-medium cursor-pointer"
+            >
+              <Edit2 className="w-4 h-4" /> Edit details
+            </button>
+          )}
+          {isAdmin && (
+            <button
+              onClick={handleDeleteExpense}
+              disabled={actionLoading}
+              className="flex items-center gap-2 text-sm bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/30 px-3 sm:px-4 py-2 rounded-full transition-colors font-medium cursor-pointer disabled:opacity-50"
+            >
+              <Trash2 className="w-4 h-4" /> Delete
+            </button>
+          )}
+        </div>
       </div>
 
       <header className="mb-6 sm:mb-8 lg:mb-10">
@@ -445,12 +475,14 @@ export default function ExpenseDetails({ expenseId: propExpenseId, onBack }: Exp
         const isParticipant = participantIds.includes(currentUserId);
         const userTotalShare = getUserShare(expense, currentUserId);
         const userPaid = getUserPaidAmount(expense, currentUserId, allExpensePayments);
+        const userPending = getUserPendingAmount(expense, currentUserId, allExpensePayments);
         const userRemaining = getUserRemainingShare(expense, currentUserId, allExpensePayments);
         // Host's share is auto-waived if they participated, otherwise normal settlement
         const isSettled = (isHost && isParticipant) || (!isHost && isParticipant && userRemaining <= 0);
+        const isPendingPayment = !isHost && isParticipant && !isSettled && userPending > 0;
 
         return (
-          <div className={`border rounded-3xl p-5 sm:p-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 sm:gap-0 ${isHost && isParticipant ? 'bg-emerald-950/20 border-emerald-800/40' : 'bg-surface-alt border-zinc-700'}`}>
+          <div className={`border rounded-3xl p-5 sm:p-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 sm:gap-0 ${isHost && isParticipant ? 'bg-emerald-950/20 border-emerald-800/40' : isPendingPayment ? 'bg-amber-950/20 border-amber-800/40' : 'bg-surface-alt border-zinc-700'}`}>
             <div>
               <div className="flex items-center gap-2 mb-1">
                 <div className="text-sm font-semibold text-zinc-400 uppercase tracking-wider">Your Share</div>
@@ -462,6 +494,11 @@ export default function ExpenseDetails({ expenseId: propExpenseId, onBack }: Exp
                 {!isHost && isParticipant && isSettled && (
                   <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
                     SETTLED
+                  </span>
+                )}
+                {isPendingPayment && (
+                  <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/10 text-amber-400 border border-amber-500/20">
+                    PENDING APPROVAL
                   </span>
                 )}
                 {isHost && (
@@ -484,16 +521,18 @@ export default function ExpenseDetails({ expenseId: propExpenseId, onBack }: Exp
                   ? 'You are not a participant in this expense'
                   : isSettled
                   ? `You have fully paid your share (RM ${userPaid.toFixed(2)})`
+                  : isPendingPayment
+                  ? `Payment of RM ${userPending.toFixed(2)} is submitted and awaiting confirmation`
                   : userPaid > 0
                   ? `Total share: RM ${userTotalShare.toFixed(2)} • Paid so far: RM ${userPaid.toFixed(2)}`
                   : 'Your calculated amount for this expense'}
               </div>
             </div>
             <div className="text-right self-end sm:self-auto">
-              <div className={`text-3xl sm:text-4xl font-semibold ${isHost && isParticipant ? 'text-emerald-400' : 'text-white'}`}>
+              <div className={`text-3xl sm:text-4xl font-semibold ${isHost && isParticipant ? 'text-emerald-400' : isPendingPayment ? 'text-amber-400' : 'text-white'}`}>
                 RM {userTotalShare.toFixed(2)}
               </div>
-              <div className={`text-[10px] sm:text-xs uppercase tracking-wider font-semibold mt-0.5 ${isHost && isParticipant ? 'text-emerald-500/70' : 'text-zinc-500'}`}>
+              <div className={`text-[10px] sm:text-xs uppercase tracking-wider font-semibold mt-0.5 ${isHost && isParticipant ? 'text-emerald-500/70' : isPendingPayment ? 'text-amber-500/70' : 'text-zinc-500'}`}>
                 {isHost
                   ? isParticipant
                     ? 'Paid by host'
@@ -502,6 +541,8 @@ export default function ExpenseDetails({ expenseId: propExpenseId, onBack }: Exp
                   ? 'No share'
                   : isSettled
                   ? 'Fully settled'
+                  : isPendingPayment
+                  ? 'Pending confirmation'
                   : 'Remaining to pay'}
               </div>
             </div>
@@ -520,10 +561,12 @@ export default function ExpenseDetails({ expenseId: propExpenseId, onBack }: Exp
           {expenseUsers.map((u) => {
             const uTotal = getUserShare(expense, u.id);
             const uPaid = getUserPaidAmount(expense, u.id, allExpensePayments);
+            const uPending = getUserPendingAmount(expense, u.id, allExpensePayments);
             const uRemaining = getUserRemainingShare(expense, u.id, allExpensePayments);
             const uIsHost = expense.creatorId === u.id;
             // Host's share is auto-waived (they paid the full bill upfront)
             const uIsSettled = uIsHost || uRemaining <= 0;
+            const uIsPending = !uIsHost && !uIsSettled && uPending > 0;
 
             return (
               <div key={u.id} className="p-3 sm:p-4 rounded-2xl border border-zinc-800/50 bg-zinc-950/50 flex items-center justify-between">
@@ -544,11 +587,19 @@ export default function ExpenseDetails({ expenseId: propExpenseId, onBack }: Exp
                           <Check className="w-2.5 h-2.5" /> Paid
                         </span>
                       )}
+                      {uIsPending && (
+                        <span className="text-[10px] bg-amber-500/10 text-amber-400 border border-amber-500/20 px-1.5 py-0.5 rounded font-semibold flex items-center gap-1">
+                          <Clock className="w-2.5 h-2.5" /> Pending
+                        </span>
+                      )}
                     </div>
                     <div className="text-xs text-zinc-500">
                       Total share: RM {uTotal.toFixed(2)}
                       {uPaid > 0 && !uIsHost && (
                         <span className="text-zinc-400 ml-1.5">• Paid: RM {uPaid.toFixed(2)}</span>
+                      )}
+                      {uPending > 0 && !uIsHost && (
+                        <span className="text-amber-400/80 ml-1.5">• Pending: RM {uPending.toFixed(2)}</span>
                       )}
                       {uIsHost && (
                         <span className="text-emerald-500/70 ml-1.5">• Waived — paid by host</span>
@@ -557,11 +608,11 @@ export default function ExpenseDetails({ expenseId: propExpenseId, onBack }: Exp
                   </div>
                 </div>
                 <div className="text-right">
-                  <div className={`font-semibold text-sm sm:text-base ${uIsHost ? 'text-emerald-400' : 'text-zinc-200'}`}>
+                  <div className={`font-semibold text-sm sm:text-base ${uIsHost ? 'text-emerald-400' : uIsPending ? 'text-amber-400' : 'text-zinc-200'}`}>
                     RM {uIsHost ? uTotal.toFixed(2) : uRemaining.toFixed(2)}
                   </div>
-                  <div className={`text-[10px] uppercase tracking-wider font-semibold ${uIsHost ? 'text-emerald-500/70' : 'text-zinc-500'}`}>
-                    {uIsHost ? 'Paid' : uIsSettled ? 'Settled' : 'Remaining'}
+                  <div className={`text-[10px] uppercase tracking-wider font-semibold ${uIsHost ? 'text-emerald-500/70' : uIsPending ? 'text-amber-500/70' : 'text-zinc-500'}`}>
+                    {uIsHost ? 'Paid' : uIsSettled ? 'Settled' : uIsPending ? 'Pending' : 'Remaining'}
                   </div>
                 </div>
               </div>

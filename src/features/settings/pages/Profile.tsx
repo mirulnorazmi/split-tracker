@@ -9,6 +9,34 @@ export default function Profile() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
   const [uploadMsg, setUploadMsg] = useState<string | null>(null);
+  const [name, setName] = useState(user?.name || '');
+  const [email, setEmail] = useState(user?.email || '');
+  const [isSaving, setIsSaving] = useState(false);
+
+  React.useEffect(() => {
+    if (user) {
+      setName(user.name);
+      setEmail(user.email);
+    }
+  }, [user]);
+
+  const handleSaveProfile = async () => {
+    if (!name || !email) return;
+    setIsSaving(true);
+    setUploadMsg(null);
+    try {
+      const res = await api.updateProfile({ name, email });
+      setUploadMsg(res.message || 'Profile updated successfully.');
+      if (!res.pendingVerification) {
+        updateUser({ name, email });
+      }
+      await refreshUser();
+    } catch (err: any) {
+      setUploadMsg(err?.message || 'Failed to update profile.');
+    } finally {
+      setIsSaving(false);
+    }
+  };
 
   const handleAvatarChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -116,15 +144,20 @@ export default function Profile() {
             <label className="block text-sm font-medium text-zinc-300 mb-2">Name</label>
             <input
               type="text"
-              defaultValue={user?.name || ''}
-              disabled
-              className="w-full bg-zinc-950/50 border border-zinc-800/50 rounded-xl px-4 py-3 text-zinc-400 cursor-not-allowed"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              className="w-full bg-zinc-950/50 border border-zinc-700/50 hover:border-zinc-600 focus:border-accent focus:ring-1 focus:ring-accent rounded-xl px-4 py-3 text-white transition-colors"
             />
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6">
             <div>
               <label className="block text-sm font-medium text-zinc-300 mb-2">Email</label>
-              <input type="text" defaultValue={user?.email || ''} disabled className="w-full bg-zinc-950/50 border border-zinc-800/50 rounded-xl px-4 py-3 text-zinc-500 cursor-not-allowed" />
+              <input 
+                type="text" 
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                className="w-full bg-zinc-950/50 border border-zinc-700/50 hover:border-zinc-600 focus:border-accent focus:ring-1 focus:ring-accent rounded-xl px-4 py-3 text-white transition-colors" 
+              />
             </div>
             <div>
               <label className="block text-sm font-medium text-zinc-300 mb-2">Role</label>
@@ -134,6 +167,16 @@ export default function Profile() {
               <label className="block text-sm font-medium text-zinc-300 mb-2">Member since</label>
               <input type="text" defaultValue={formatDate(user?.created_at)} disabled className="w-full bg-zinc-950/50 border border-zinc-800/50 rounded-xl px-4 py-3 text-zinc-500 cursor-not-allowed" />
             </div>
+          </div>
+          
+          <div className="pt-4 flex items-center justify-end">
+            <button
+              onClick={handleSaveProfile}
+              disabled={isSaving || (name === user?.name && email === user?.email)}
+              className="px-6 py-2.5 bg-accent text-accent-text font-bold rounded-lg text-sm hover:opacity-90 transition-opacity disabled:opacity-50 cursor-pointer"
+            >
+              {isSaving ? 'Saving...' : 'Save Changes'}
+            </button>
           </div>
         </div>
       </div>

@@ -28,13 +28,31 @@ export function getUserShare(expense: any, userId: string): number {
 }
 
 /**
- * Calculates the total amount paid by a user for a specific expense.
- * Sums all Confirmed (and Pending) payments made by this user applied to this expense.
+ * Calculates the total confirmed amount paid by a user for a specific expense.
  */
 export function getUserPaidAmount(expense: any, userId: string, allPayments: any[]): number {
   if (!expense || !userId || !allPayments || !Array.isArray(allPayments)) return 0;
   return allPayments
-    .filter((p) => p.payerId === userId && (p.status === 'Confirmed' || p.status === 'Pending'))
+    .filter((p) => p.payerId === userId && p.status === 'Confirmed')
+    .reduce((sum, p) => {
+      if (p.expensesApplied && Array.isArray(p.expensesApplied)) {
+        const match = p.expensesApplied.find((ea: any) => ea.expenseId === expense.id);
+        return sum + (match ? Number(match.amountApplied || 0) : 0);
+      }
+      if (p.expenseIds && Array.isArray(p.expenseIds) && p.expenseIds.includes(expense.id)) {
+        return sum + Number(p.amount || 0);
+      }
+      return sum;
+    }, 0);
+}
+
+/**
+ * Calculates the pending payment amount for a user for a specific expense.
+ */
+export function getUserPendingAmount(expense: any, userId: string, allPayments: any[]): number {
+  if (!expense || !userId || !allPayments || !Array.isArray(allPayments)) return 0;
+  return allPayments
+    .filter((p) => p.payerId === userId && p.status === 'Pending')
     .reduce((sum, p) => {
       if (p.expensesApplied && Array.isArray(p.expensesApplied)) {
         const match = p.expensesApplied.find((ea: any) => ea.expenseId === expense.id);
@@ -49,19 +67,26 @@ export function getUserPaidAmount(expense: any, userId: string, allPayments: any
 
 /**
  * Calculates the remaining unpaid balance that a user owes for an expense.
+ * If includePending is true, pending payments also reduce the remaining share.
  * If the user is the expense creator, remaining is 0.
  */
-export function getUserRemainingShare(expense: any, userId: string, allPayments: any[]): number {
+export function getUserRemainingShare(
+  expense: any,
+  userId: string,
+  allPayments: any[],
+  includePending: boolean = false
+): number {
   if (!expense || !userId) return 0;
   if (expense.creatorId === userId) return 0;
   const totalShare = getUserShare(expense, userId);
   const paid = getUserPaidAmount(expense, userId, allPayments);
-  const remaining = totalShare - paid;
+  const pending = includePending ? getUserPendingAmount(expense, userId, allPayments) : 0;
+  const remaining = totalShare - paid - pending;
   return remaining > 0.009 ? remaining : 0;
 }
 
 /**
- * Determines whether a given user has fully paid their share of an expense.
+ * Determines whether a given user has fully paid their share of an expense (Confirmed).
  * The creator of the expense is considered to have already paid.
  */
 export function hasUserFullyPaid(
@@ -71,7 +96,20 @@ export function hasUserFullyPaid(
 ): boolean {
   if (!expense || !userId) return true;
   if (expense.creatorId === userId) return true;
-  return getUserRemainingShare(expense, userId, allPayments) <= 0.009;
+  return getUserRemainingShare(expense, userId, allPayments, false) <= 0.009;
+}
+
+/**
+ * Determines whether a user's share is covered either by confirmed payment or pending payment.
+ */
+export function hasUserPendingOrPaid(
+  expense: any,
+  userId: string,
+  allPayments: any[]
+): boolean {
+  if (!expense || !userId) return true;
+  if (expense.creatorId === userId) return true;
+  return getUserRemainingShare(expense, userId, allPayments, true) <= 0.009;
 }
 
 /**

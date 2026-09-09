@@ -58,6 +58,7 @@ export function ParticipantPicker({
         <label className="block text-sm font-medium text-zinc-300">Participants &amp; Split</label>
         <div className="flex bg-zinc-950 border border-zinc-800 rounded-lg p-1 w-full sm:w-fit">
           <button
+            type="button"
             onClick={() => onChangeSplitMethod('equal')}
             className={cn(
               'px-4 py-1.5 text-xs font-medium rounded-md transition-colors flex-1 sm:flex-none',
@@ -67,6 +68,7 @@ export function ParticipantPicker({
             Equally
           </button>
           <button
+            type="button"
             onClick={() => onChangeSplitMethod('custom')}
             className={cn(
               'px-4 py-1.5 text-xs font-medium rounded-md transition-colors flex-1 sm:flex-none',

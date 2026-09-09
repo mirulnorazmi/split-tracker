@@ -13,7 +13,7 @@
     "preview": "vite preview",
     "migrate": "tsx server/src/db/migrate.ts",
     "clean": "rm -rf dist",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit && tsc -p server/tsconfig.json --noEmit"
   },
   "dependencies": {
     "@fastify/cors": "^11.0.1",
@@ -30,6 +30,7 @@
     "lucide-react": "^0.546.0",
     "minio": "^8.0.5",
     "motion": "^12.23.24",
+    "nodemailer": "^10.0.0",
     "pg": "^8.14.1",
     "react": "^19.0.1",
     "react-dom": "^19.0.1",
@@ -40,6 +41,7 @@
   "devDependencies": {
     "@types/bcryptjs": "^2.4.6",
     "@types/node": "^22.14.0",
+    "@types/nodemailer": "^8.0.1",
     "@types/pg": "^8.11.11",
     "autoprefixer": "^10.4.21",
     "concurrently": "^9.1.2",
