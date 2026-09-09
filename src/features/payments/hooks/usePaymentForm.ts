@@ -72,7 +72,9 @@ export function usePaymentForm() {
   // The host is determined by the first selected expense's creator
   const selectedHostId =
     selectedExpenses.length > 0
-      ? userExpenses.find((e) => e.id === selectedExpenses[0])?.creatorId ?? null
+      ? (expenses.find((e: any) => e.id === selectedExpenses[0])?.creatorId ??
+         userExpenses.find((e) => e.id === selectedExpenses[0])?.creatorId ??
+         null)
       : null;
 
   return {

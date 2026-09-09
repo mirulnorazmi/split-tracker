@@ -17,12 +17,20 @@ export default defineConfig(() => {
       hmr: process.env.DISABLE_HMR !== 'true',
       // Disable file watching when DISABLE_HMR is true to save CPU during agent edits.
       watch: process.env.DISABLE_HMR === 'true' ? null : {},
-      // Proxy API requests to the Fastify server
+      // Proxy API requests and media streaming to the Fastify server
       proxy: {
         '/api': {
           target: 'http://localhost:3001',
           changeOrigin: true,
           rewrite: (path) => path.replace(/^\/api/, ''),
+        },
+        '/receipts': {
+          target: 'http://localhost:3001',
+          changeOrigin: true,
+        },
+        '/avatars': {
+          target: 'http://localhost:3001',
+          changeOrigin: true,
         },
       },
     },

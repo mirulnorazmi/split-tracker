@@ -1,10 +1,10 @@
 import React, { useState } from 'react';
 import { useParams } from 'react-router-dom';
-import { Check, Clock } from 'lucide-react';
+import { Check, Clock, Eye, Download, ExternalLink, Image as ImageIcon } from 'lucide-react';
 import { useAuth } from '@/app/AuthContext';
 import { usePayments, useExpenses, useUsers } from '@/lib/hooks/useData';
-import { api } from '@/lib/api';
-import { BackButton } from '@/components';
+import { api, getReceiptUrl } from '@/lib/api';
+import { BackButton, ReceiptLightbox } from '@/components';
 
 type PaymentDetailsProps = {
   paymentId?: string;
@@ -20,6 +20,7 @@ export default function PaymentDetails({ paymentId: propPaymentId, onBack }: Pay
   const { expenses } = useExpenses();
   const { users } = useUsers();
   const [actionLoading, setActionLoading] = useState(false);
+  const [isReceiptLightboxOpen, setIsReceiptLightboxOpen] = useState(false);
 
   const payment = payments.find((p) => p.id === paymentId);
 
@@ -111,6 +112,83 @@ export default function PaymentDetails({ paymentId: propPaymentId, onBack }: Pay
         <div className="text-4xl sm:text-5xl font-light text-white">RM {Number(payment.amount).toFixed(2)}</div>
       </div>
 
+      {/* Payment Receipt Card */}
+      <div className="bg-surface-alt border border-zinc-800 rounded-3xl p-6 sm:p-8 space-y-4">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <h3 className="text-sm font-semibold text-zinc-400 uppercase tracking-wider">Payment Receipt</h3>
+            {payment.receiptUrl && (
+              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                VERIFIED PROOF
+              </span>
+            )}
+          </div>
+          {payment.receiptUrl && (
+            <span className="text-xs text-zinc-500">Stored in MinIO object storage</span>
+          )}
+        </div>
+
+        {payment.receiptUrl ? (
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 p-4 rounded-2xl border border-zinc-800/80 bg-zinc-950/50">
+            <div className="flex items-center gap-4 min-w-0">
+              <div
+                onClick={() => setIsReceiptLightboxOpen(true)}
+                className="relative w-20 h-20 rounded-xl border border-zinc-700/80 bg-zinc-900 overflow-hidden shrink-0 cursor-pointer group shadow-md"
+              >
+                <img
+                  src={getReceiptUrl(payment.receiptUrl)}
+                  alt="Payment receipt proof"
+                  loading="lazy"
+                  className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-110"
+                />
+                <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                  <Eye className="w-5 h-5 text-white" />
+                </div>
+              </div>
+
+              <div className="min-w-0">
+                <div className="font-medium text-white text-sm sm:text-base mb-0.5">
+                  Transfer Slip / Screenshot
+                </div>
+                <div className="text-xs text-zinc-400 mb-2">
+                  Attached during payment submission
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setIsReceiptLightboxOpen(true)}
+                    className="inline-flex items-center gap-1 text-xs font-semibold text-accent hover:text-accent/80 transition-colors cursor-pointer"
+                  >
+                    <Eye className="w-3.5 h-3.5" /> View Full Receipt
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 self-end sm:self-center">
+              <button
+                onClick={() => setIsReceiptLightboxOpen(true)}
+                className="px-3 py-2 rounded-xl bg-zinc-900 border border-zinc-800 text-zinc-300 hover:text-white hover:bg-zinc-800 transition-colors text-xs font-medium flex items-center gap-1.5 cursor-pointer"
+              >
+                <Eye className="w-3.5 h-3.5" /> Inspect
+              </button>
+              <a
+                href={getReceiptUrl(payment.receiptUrl)}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="p-2 rounded-xl bg-zinc-900 border border-zinc-800 text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors cursor-pointer"
+                title="Open in new tab"
+              >
+                <ExternalLink className="w-4 h-4" />
+              </a>
+            </div>
+          </div>
+        ) : (
+          <div className="p-6 text-center border border-zinc-800/60 rounded-2xl bg-zinc-950/30 text-zinc-500 text-xs sm:text-sm">
+            No receipt screenshot attached for this payment.
+          </div>
+        )}
+      </div>
+
       <div className="space-y-4">
         <h3 className="text-lg font-medium text-white mb-4">Sessions paid for</h3>
         {paymentExpenses.length === 0 && (!payment.recurringItemsApplied || payment.recurringItemsApplied.length === 0) ? (
@@ -186,6 +264,15 @@ export default function PaymentDetails({ paymentId: propPaymentId, onBack }: Pay
           </div>
         </div>
       )}
+
+      <ReceiptLightbox
+        isOpen={isReceiptLightboxOpen}
+        onClose={() => setIsReceiptLightboxOpen(false)}
+        receiptUrl={payment.receiptUrl}
+        title={`Receipt for Payment to ${payeeName}`}
+        payerName={payerName}
+        amount={Number(payment.amount)}
+      />
     </div>
   );
 }

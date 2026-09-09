@@ -1,6 +1,6 @@
 import React from 'react';
 import { NavLink } from 'react-router-dom';
-import { LayoutGrid, FileText, CreditCard, Repeat, User, Settings, CheckSquare, Users, X, LogOut, HelpCircle } from 'lucide-react';
+import { LayoutGrid, FileText, CreditCard, Repeat, User, Settings, CheckSquare, Users, X, LogOut, HelpCircle, Folder } from 'lucide-react';
 import { cn } from '@/lib/utils/cn';
 import { useAuth } from '@/app/AuthContext';
 import { useAdminPendingCounts } from '@/lib/hooks/useData';
@@ -22,6 +22,7 @@ export default function Sidebar({ onClose, isLocked }: SidebarProps) {
   const workspaceLinks = [
     { to: '/dashboard', label: 'Dashboard', icon: LayoutGrid, tourId: 'sidebar-dashboard' },
     { to: '/expenses', label: 'Expenses', icon: FileText, tourId: 'sidebar-expenses' },
+    { to: '/folders', label: 'Folders', icon: Folder, tourId: 'sidebar-folders' },
     { to: '/subscriptions', label: 'Subscriptions', icon: Repeat, tourId: 'sidebar-subscriptions' },
     { to: '/payments', label: 'Payments', icon: CreditCard, tourId: 'sidebar-payments' },
   ];

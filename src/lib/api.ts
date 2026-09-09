@@ -171,13 +171,15 @@ export const api = {
     title: string;
     totalAmount: number;
     categoryId: string;
+    folderId?: string | null;
     participants: { userId: string; amountOwed: number }[];
   }) => request<Expense>('POST', '/expenses', data),
 
-  listExpenses: (params?: { status?: string; creatorId?: string }) => {
+  listExpenses: (params?: { status?: string; creatorId?: string; folderId?: string }) => {
     const qs = new URLSearchParams();
     if (params?.status) qs.set('status', params.status);
     if (params?.creatorId) qs.set('creatorId', params.creatorId);
+    if (params?.folderId) qs.set('folderId', params.folderId);
     const query = qs.toString();
     return request<Expense[]>('GET', `/expenses${query ? `?${query}` : ''}`);
   },
@@ -190,6 +192,7 @@ export const api = {
       title?: string;
       totalAmount?: number;
       categoryId?: string;
+      folderId?: string | null;
       participants?: { userId: string; amountOwed: number }[];
     }
   ) => request<Expense>('PUT', `/expenses/${id}`, data),
@@ -200,13 +203,36 @@ export const api = {
   deleteExpense: (id: string) =>
     request<{ message: string; id: string; title?: string }>('DELETE', `/expenses/${id}`),
 
+  // Folders / Groups
+  listFolders: () => request<Folder[]>('GET', '/folders'),
+
+  getFolder: (id: string) => request<FolderDetail>('GET', `/folders/${id}`),
+
+  createFolder: (data: { name: string; description?: string; category?: string; color?: string }) =>
+    request<Folder>('POST', '/folders', data),
+
+  updateFolder: (id: string, data: Partial<{ name: string; description?: string; category?: string; color?: string }>) =>
+    request<Folder>('PUT', `/folders/${id}`, data),
+
+  deleteFolder: (id: string) =>
+    request<{ message: string; id: string }>('DELETE', `/folders/${id}`),
+
+  addExpensesToFolder: (folderId: string, expenseIds: string[]) =>
+    request<{ message: string }>('POST', `/folders/${folderId}/expenses`, { expenseIds }),
+
+  removeExpenseFromFolder: (folderId: string, expenseId: string) =>
+    request<{ message: string }>('DELETE', `/folders/${folderId}/expenses/${expenseId}`),
+
   // Payments
   createPayment: (data: {
     amount: number;
     payeeId: string;
+    receiptUrl: string;
     expensesApplied?: { expenseId: string; amountApplied: number }[];
     recurringItemsApplied?: { cycleItemId: string; amountApplied: number }[];
   }) => request<Payment>('POST', '/payments', data),
+
+  getPayment: (id: string) => request<Payment>('GET', `/payments/${id}`),
 
   listPayments: (params?: { status?: string; payerId?: string; payeeId?: string; expenseId?: string }) => {
     const qs = new URLSearchParams();
@@ -220,6 +246,12 @@ export const api = {
 
   updatePaymentStatus: (id: string, status: string) =>
     request<{ id: string; status: string; confirmedDate: string; confirmedById?: string; confirmedByName?: string; message: string }>('PATCH', `/payments/${id}/status`, { status }),
+
+  uploadPaymentReceipt: (file: File) => {
+    const formData = new FormData();
+    formData.append('receipt', file);
+    return request<{ receiptUrl: string; objectName?: string; message: string }>('POST', '/payments/receipt', formData, { isFormData: true });
+  },
 
   // Dashboard
   getDashboardStats: () =>
@@ -259,6 +291,19 @@ export const api = {
   },
 };
 
+export function getReceiptUrl(url: string | null | undefined): string {
+  if (!url) return '';
+  if (
+    url.startsWith('http://') ||
+    url.startsWith('https://') ||
+    url.startsWith('blob:') ||
+    url.startsWith('data:')
+  ) {
+    return url;
+  }
+  return `${API_BASE}${url.startsWith('/') ? '' : '/'}${url}`;
+}
+
 // ─── Types ───────────────────────────────────────────────────────────────────
 
 export interface Category {
@@ -281,6 +326,9 @@ export interface Expense {
   status: string;
   categoryId: string;
   creatorId: string;
+  folderId?: string | null;
+  folderName?: string;
+  folderColor?: string;
   approvedById?: string | null;
   approvedByName?: string | null;
   approvedAt?: string | null;
@@ -288,6 +336,41 @@ export interface Expense {
   categoryIcon?: string;
   categoryColor?: string;
   participants: ExpenseParticipant[];
+}
+
+export interface FolderParticipantSummary {
+  userId: string;
+  name: string;
+  avatar?: string | null;
+  initials: string;
+  email: string;
+  totalShare: number;
+  totalPaid: number;
+  remainingOwed: number;
+  status: 'SETTLED' | 'PENDING';
+  isHost: boolean;
+}
+
+export interface Folder {
+  id: string;
+  name: string;
+  description?: string | null;
+  category?: string;
+  color?: string;
+  createdBy: string;
+  creatorName?: string;
+  createdAt: string;
+  updatedAt: string;
+  expenseCount?: number;
+  totalExpenses?: number;
+  totalCollected?: number;
+  totalOutstanding?: number;
+  participantsPreview?: { id: string; name: string; avatar?: string; initials: string }[];
+}
+
+export interface FolderDetail extends Folder {
+  expenses: Expense[];
+  participantSummary: FolderParticipantSummary[];
 }
 
 export interface Payment {

@@ -20,6 +20,9 @@ const Subscriptions = React.lazy(() => import('@/features/recurring/pages/Subscr
 const NewSubscription = React.lazy(() => import('@/features/recurring/pages/NewSubscription'));
 const SubscriptionDetails = React.lazy(() => import('@/features/recurring/pages/SubscriptionDetails'));
 
+const Folders = React.lazy(() => import('@/features/folders/pages/Folders'));
+const FolderDetails = React.lazy(() => import('@/features/folders/pages/FolderDetails'));
+
 /**
  * AppRoutes defines all URL routes in the application.
  */
@@ -66,6 +69,9 @@ export function AppRoutes() {
       <Route path="/expenses" element={<Expenses />} />
       <Route path="/expenses/new" element={<NewExpense />} />
       <Route path="/expenses/:id" element={<ExpenseDetails />} />
+
+      <Route path="/folders" element={<Folders />} />
+      <Route path="/folders/:id" element={<FolderDetails />} />
 
       <Route path="/subscriptions" element={<Subscriptions />} />
       <Route path="/subscriptions/new" element={<NewSubscription />} />

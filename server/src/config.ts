@@ -37,6 +37,7 @@ export const config = {
     const defaultPort = isSSL ? 443 : 9000;
     const port = parseInt(process.env.MINIO_PORT || String(defaultPort), 10);
     const bucket = process.env.MINIO_BUCKET || 'splittrack-avatars';
+    const receiptBucket = process.env.MINIO_RECEIPT_BUCKET || 'og-bucket';
     const publicUrl = (process.env.MINIO_PUBLIC_URL || `${isSSL ? 'https' : 'http'}://${cleanEndpoint}:${port}/${bucket}`).replace(/^https?:\/\/https?:\/\//, 'https://');
 
     return {
@@ -46,6 +47,7 @@ export const config = {
       accessKey: process.env.MINIO_ACCESS_KEY || 'minioadmin',
       secretKey: process.env.MINIO_SECRET_KEY || 'minioadmin',
       bucket,
+      receiptBucket,
       publicUrl,
     };
   })(),

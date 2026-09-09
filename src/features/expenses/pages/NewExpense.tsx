@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, Shield } from 'lucide-react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
+import { ArrowLeft, Shield, Folder as FolderIcon } from 'lucide-react';
 import { useAuth } from '@/app/AuthContext';
 import { useCategories, useUsers } from '@/lib/hooks/useData';
-import { api } from '@/lib/api';
+import { api, Folder } from '@/lib/api';
 import { useExpenseForm } from '@/features/expenses/hooks/useExpenseForm';
 import { ParticipantPicker, SuccessScreen, BackButton } from '@/components';
 
@@ -11,6 +11,9 @@ type Step = 'form' | 'confirm' | 'success';
 
 export default function NewExpense() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const initialFolderId = searchParams.get('folderId') || '';
+
   const { user: currentUser } = useAuth();
   const { categories } = useCategories();
   const { users } = useUsers();
@@ -19,6 +22,21 @@ export default function NewExpense() {
   const [countdown, setCountdown] = useState(5);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const [selectedFolderId, setSelectedFolderId] = useState<string>(initialFolderId);
+  const [folders, setFolders] = useState<Folder[]>([]);
+
+  useEffect(() => {
+    api.listFolders()
+      .then((data) => {
+        // Rule: Only the folder owner can add expenses to their folder
+        const myFolders = data.filter((f) => currentUser?.role === 'Admin' || f.createdBy === currentUser?.id);
+        setFolders(myFolders);
+        if (initialFolderId && !myFolders.some((f) => f.id === initialFolderId)) {
+          setSelectedFolderId('');
+        }
+      })
+      .catch((err) => console.error('Failed to load folders:', err));
+  }, [currentUser, initialFolderId]);
 
   const form = useExpenseForm({
     initialCategoryId: categories[0]?.id || '',
@@ -44,13 +62,17 @@ export default function NewExpense() {
     let timer: NodeJS.Timeout;
     if (step === 'success') {
       if (countdown <= 0) {
-        navigate('/expenses');
+        if (selectedFolderId) {
+          navigate(`/folders/${selectedFolderId}`);
+        } else {
+          navigate('/expenses');
+        }
       } else {
         timer = setTimeout(() => setCountdown((prev) => prev - 1), 1000);
       }
     }
     return () => clearTimeout(timer);
-  }, [step, countdown, navigate]);
+  }, [step, countdown, navigate, selectedFolderId]);
 
   const handleConfirmSubmit = async () => {
     setIsSubmitting(true);
@@ -71,6 +93,7 @@ export default function NewExpense() {
         title: form.title,
         totalAmount: form.numAmount,
         categoryId: form.selectedCategory,
+        folderId: selectedFolderId || undefined,
         participants,
       });
 
@@ -230,16 +253,34 @@ export default function NewExpense() {
           </div>
         </div>
 
-        <div>
-          <label className="block text-sm font-medium text-zinc-300 mb-2">Total Amount (RM)</label>
-          <input
-            type="text"
-            inputMode="numeric"
-            value={form.amount}
-            onChange={(e) => form.handleAmountChange(e.target.value)}
-            placeholder="0.00"
-            className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-zinc-600 transition-colors placeholder:text-zinc-600"
-          />
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6">
+          <div>
+            <label className="block text-sm font-medium text-zinc-300 mb-2">Total Amount (RM)</label>
+            <input
+              type="text"
+              inputMode="numeric"
+              value={form.amount}
+              onChange={(e) => form.handleAmountChange(e.target.value)}
+              placeholder="0.00"
+              className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-zinc-600 transition-colors placeholder:text-zinc-600"
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-zinc-300 mb-2 flex items-center gap-1.5">
+              <FolderIcon className="w-3.5 h-3.5 text-accent" />
+              Folder / Group (Optional)
+            </label>
+            <select
+              value={selectedFolderId}
+              onChange={(e) => setSelectedFolderId(e.target.value)}
+              className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-zinc-600 transition-colors text-sm appearance-none cursor-pointer"
+            >
+              <option value="">None (Standalone Expense)</option>
+              {folders.map((f) => (
+                <option key={f.id} value={f.id}>{f.name} ({f.category || 'General'})</option>
+              ))}
+            </select>
+          </div>
         </div>
 
         <ParticipantPicker
@@ -264,6 +305,14 @@ export default function NewExpense() {
               <span className="text-zinc-500">Requester</span>
               <span className="text-zinc-300 font-medium">{currentUser?.name}</span>
             </div>
+            {selectedFolderId && (
+              <div className="flex justify-between">
+                <span className="text-zinc-500">Folder</span>
+                <span className="text-accent font-medium">
+                  {folders.find((f) => f.id === selectedFolderId)?.name || 'Selected Folder'}
+                </span>
+              </div>
+            )}
             <div className="flex justify-between">
               <span className="text-zinc-500">Total amount</span>
               <span className="text-zinc-300 font-medium">RM {form.amount || '0.00'}</span>

@@ -5,6 +5,7 @@ interface CreateExpenseBody {
   title: string;
   totalAmount: number;
   categoryId: string;
+  folderId?: string | null;
   participants: { userId: string; amountOwed: number }[];
 }
 
@@ -19,7 +20,7 @@ export default async function expenseRoutes(fastify: FastifyInstance) {
    */
   fastify.post('/expenses', { preHandler: [fastify.authenticate] }, async (request: FastifyRequest, reply: FastifyReply) => {
     const { role, id: creatorId } = request.user as { role: string; id: string };
-    const { title, totalAmount, categoryId, participants } = request.body as CreateExpenseBody;
+    const { title, totalAmount, categoryId, folderId, participants } = request.body as CreateExpenseBody;
 
     if (!title || !totalAmount || !categoryId || !participants || participants.length === 0) {
       return reply.status(400).send({ error: 'Bad Request', message: 'title, totalAmount, categoryId, and participants are required' });
@@ -34,14 +35,25 @@ export default async function expenseRoutes(fastify: FastifyInstance) {
     // Admin-created expenses are auto-confirmed
     const status = role === 'Admin' ? 'Confirmed' : 'Pending';
 
+    // Rule: If assigning to a folder, only the folder owner can add expenses to it
+    if (folderId) {
+      const { rows: fRows } = await query('SELECT created_by AS "createdBy" FROM folder WHERE id = $1', [folderId]);
+      if (fRows.length === 0) {
+        return reply.status(400).send({ error: 'Bad Request', message: 'Selected folder does not exist' });
+      }
+      if (role !== 'Admin' && fRows[0].createdBy !== creatorId) {
+        return reply.status(403).send({ error: 'Forbidden', message: 'Only the folder owner can add expenses to this folder' });
+      }
+    }
+
     const client = await getClient();
     try {
       await client.query('BEGIN');
       const { rows: [expense] } = await client.query(
-        `INSERT INTO expense (title, total_amount, category_id, creator_id, status)
-         VALUES ($1, $2, $3, $4, $5)
-         RETURNING id, title, total_amount, date, category_id, creator_id, status, created_at`,
-        [title, totalAmount, categoryId, creatorId, status]
+        `INSERT INTO expense (title, total_amount, category_id, creator_id, status, folder_id)
+         VALUES ($1, $2, $3, $4, $5, $6)
+         RETURNING id, title, total_amount, date, category_id, creator_id, status, folder_id AS "folderId", created_at`,
+        [title, totalAmount, categoryId, creatorId, status, folderId || null]
       );
 
       for (const p of participants) {
@@ -54,11 +66,13 @@ export default async function expenseRoutes(fastify: FastifyInstance) {
       await client.query('COMMIT');
 
       const { rows: [full] } = await client.query(
-        `SELECT e.*, COALESCE(json_agg(json_build_object('userId', ep.user_id, 'amountOwed', ep.amount_owed)) FILTER (WHERE ep.user_id IS NOT NULL), '[]') AS participants
+        `SELECT e.*, e.folder_id AS "folderId", f.name AS "folderName", f.color AS "folderColor",
+                COALESCE(json_agg(json_build_object('userId', ep.user_id, 'amountOwed', ep.amount_owed)) FILTER (WHERE ep.user_id IS NOT NULL), '[]') AS participants
          FROM expense e
+         LEFT JOIN folder f ON f.id = e.folder_id
          LEFT JOIN expense_participant ep ON ep.expense_id = e.id
          WHERE e.id = $1
-         GROUP BY e.id`,
+         GROUP BY e.id, f.id`,
         [expense.id]
       );
 
@@ -77,7 +91,7 @@ export default async function expenseRoutes(fastify: FastifyInstance) {
    */
   fastify.get('/expenses', { preHandler: [fastify.authenticate] }, async (request: FastifyRequest, reply: FastifyReply) => {
     const { role, id: userId } = request.user as { role: string; id: string };
-    const { status, creatorId } = request.query as { status?: string; creatorId?: string };
+    const { status, creatorId, folderId } = request.query as { status?: string; creatorId?: string; folderId?: string };
     const params: any[] = [];
     const conditions: string[] = [];
 
@@ -96,21 +110,27 @@ export default async function expenseRoutes(fastify: FastifyInstance) {
       params.push(creatorId);
       conditions.push(`e.creator_id = $${params.length}`);
     }
+    if (folderId) {
+      params.push(folderId);
+      conditions.push(`e.folder_id = $${params.length}`);
+    }
 
     const where = conditions.length > 0 ? 'WHERE ' + conditions.join(' AND ') : '';
 
     const { rows } = await query(
       `SELECT e.id, e.title, e.total_amount AS "totalAmount", e.date, e.status,
               e.category_id AS "categoryId", e.creator_id AS "creatorId",
+              e.folder_id AS "folderId", f.name AS "folderName", f.color AS "folderColor",
               e.approved_by AS "approvedById", approver.name AS "approvedByName", e.approved_at AS "approvedAt",
               c.name AS "categoryName", c.icon AS "categoryIcon", c.color AS "categoryColor",
               COALESCE(json_agg(json_build_object('userId', ep.user_id, 'amountOwed', ep.amount_owed)) FILTER (WHERE ep.user_id IS NOT NULL), '[]') AS participants
        FROM expense e
        JOIN category c ON c.id = e.category_id
+       LEFT JOIN folder f ON f.id = e.folder_id
        LEFT JOIN "user" approver ON approver.id = e.approved_by
        LEFT JOIN expense_participant ep ON ep.expense_id = e.id
        ${where}
-       GROUP BY e.id, c.id, approver.id
+       GROUP BY e.id, c.id, approver.id, f.id
        ORDER BY e.date DESC`,
       params
     );
@@ -129,15 +149,17 @@ export default async function expenseRoutes(fastify: FastifyInstance) {
     const { rows } = await query(
       `SELECT e.id, e.title, e.total_amount AS "totalAmount", e.date, e.status,
               e.category_id AS "categoryId", e.creator_id AS "creatorId",
+              e.folder_id AS "folderId", f.name AS "folderName", f.color AS "folderColor",
               e.approved_by AS "approvedById", approver.name AS "approvedByName", e.approved_at AS "approvedAt",
               c.name AS "categoryName", c.icon AS "categoryIcon", c.color AS "categoryColor",
               COALESCE(json_agg(json_build_object('userId', ep.user_id, 'amountOwed', ep.amount_owed)) FILTER (WHERE ep.user_id IS NOT NULL), '[]') AS participants
        FROM expense e
        JOIN category c ON c.id = e.category_id
+       LEFT JOIN folder f ON f.id = e.folder_id
        LEFT JOIN "user" approver ON approver.id = e.approved_by
        LEFT JOIN expense_participant ep ON ep.expense_id = e.id
        WHERE e.id = $1
-       GROUP BY e.id, c.id, approver.id`,
+       GROUP BY e.id, c.id, approver.id, f.id`,
       [id]
     );
 
@@ -163,7 +185,7 @@ export default async function expenseRoutes(fastify: FastifyInstance) {
   fastify.put('/expenses/:id', { preHandler: [fastify.authenticate] }, async (request: FastifyRequest, reply: FastifyReply) => {
     const { role, id: userId } = request.user as { role: string; id: string };
     const { id } = request.params as { id: string };
-    const { title, totalAmount, categoryId, participants } = request.body as Partial<CreateExpenseBody>;
+    const { title, totalAmount, categoryId, folderId, participants } = request.body as Partial<CreateExpenseBody>;
 
     const { rows: existingRows } = await query('SELECT * FROM expense WHERE id = $1', [id]);
     if (existingRows.length === 0) {
@@ -175,6 +197,17 @@ export default async function expenseRoutes(fastify: FastifyInstance) {
       return reply.status(403).send({ error: 'Forbidden', message: 'Only the creator or an admin can edit this expense' });
     }
 
+    // Rule: If assigning to a folder, only the folder owner can add expenses to it
+    if (folderId) {
+      const { rows: fRows } = await query('SELECT created_by AS "createdBy" FROM folder WHERE id = $1', [folderId]);
+      if (fRows.length === 0) {
+        return reply.status(400).send({ error: 'Bad Request', message: 'Selected folder does not exist' });
+      }
+      if (role !== 'Admin' && fRows[0].createdBy !== userId) {
+        return reply.status(403).send({ error: 'Forbidden', message: 'Only the folder owner can add expenses to this folder' });
+      }
+    }
+
     const client = await getClient();
     try {
       await client.query('BEGIN');
@@ -184,10 +217,18 @@ export default async function expenseRoutes(fastify: FastifyInstance) {
          SET title = COALESCE($1, title),
              total_amount = COALESCE($2, total_amount),
              category_id = COALESCE($3, category_id),
+             folder_id = CASE WHEN $4::boolean THEN $5::uuid ELSE folder_id END,
              updated_at = NOW()
-         WHERE id = $4
-         RETURNING *`,
-        [title ?? null, totalAmount ?? null, categoryId ?? null, id]
+         WHERE id = $6
+         RETURNING id, title, total_amount, category_id, folder_id AS "folderId", status`,
+        [
+          title ?? null,
+          totalAmount ?? null,
+          categoryId ?? null,
+          folderId !== undefined,
+          folderId || null,
+          id,
+        ]
       );
 
       if (participants && Array.isArray(participants) && participants.length > 0) {

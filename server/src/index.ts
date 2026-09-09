@@ -18,6 +18,7 @@ import paymentRoutes from './routes/payments.js';
 import dashboardRoutes from './routes/dashboard.js';
 import avatarRoutes from './routes/avatar.js';
 import recurringRoutes from './routes/recurring.js';
+import folderRoutes from './routes/folders.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -71,7 +72,7 @@ export async function buildServer() {
   });
 
   await fastify.register(multipart, {
-    limits: { fileSize: 5 * 1024 * 1024 }, // 5MB
+    limits: { fileSize: 15 * 1024 * 1024 }, // 15MB (supports high-res receipt photos)
   });
 
   await fastify.register(authPlugin);
@@ -85,6 +86,7 @@ export async function buildServer() {
   await fastify.register(dashboardRoutes);
   await fastify.register(avatarRoutes);
   await fastify.register(recurringRoutes);
+  await fastify.register(folderRoutes);
 
   // ── 4. Health Check (logLevel: 'silent' completely stops Kubernetes probe logs) ──
   fastify.get('/health', { logLevel: 'silent' }, async () => ({
@@ -130,11 +132,12 @@ export async function buildServer() {
       const accept = req.headers.accept || '';
       const secFetchDest = req.headers['sec-fetch-dest'];
 
-      // Never intercept static assets, health probes, or avatar streaming
+      // Never intercept static assets, health probes, avatar or receipt streaming
       if (
         url === '/health' ||
         url.startsWith('/health') ||
         url.startsWith('/avatars') ||
+        url.startsWith('/receipts') ||
         url.startsWith('/assets') ||
         url.includes('.')
       ) {

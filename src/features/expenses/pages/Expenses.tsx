@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import { ArrowRight, Plus, Search, X, Trash2, ChevronLeft, ChevronRight } from 'lucide-react';
+import { ArrowRight, Plus, Search, X, Trash2, ChevronLeft, ChevronRight, Folder as FolderIcon } from 'lucide-react';
 import { useAuth } from '@/app/AuthContext';
 import { useExpenses, usePayments, useCategories, useUsers } from '@/lib/hooks/useData';
 import { isExpenseClosed, getUserShare, getUserPaidAmount, getUserPendingAmount, getUserRemainingShare } from '@/lib/utils/expense';
@@ -259,6 +259,12 @@ export default function Expenses() {
                         {expense.status === 'Pending' && (
                           <span className="px-1.5 py-0.5 rounded text-[9px] font-semibold bg-amber-500/10 text-amber-400 border border-amber-500/20">
                             Pending
+                          </span>
+                        )}
+                        {expense.folderName && (
+                          <span className="px-2 py-0.5 rounded-full text-[9px] font-medium bg-zinc-800 text-zinc-300 border border-zinc-700 flex items-center gap-1">
+                            <FolderIcon className="w-2.5 h-2.5 text-accent" />
+                            {expense.folderName}
                           </span>
                         )}
                       </div>

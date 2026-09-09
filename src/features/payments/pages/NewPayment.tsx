@@ -1,12 +1,12 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { ArrowLeft, Check } from 'lucide-react';
+import { ArrowLeft, Check, UploadCloud, Eye, Trash2, AlertCircle, CheckCircle2 } from 'lucide-react';
 import { useAuth } from '@/app/AuthContext';
 import { useUsers } from '@/lib/hooks/useData';
 import { api, RecurringExpense } from '@/lib/api';
 import { getUserShare, getUserPaidAmount, getUserRemainingShare } from '@/lib/utils/expense';
 import { usePaymentForm } from '@/features/payments/hooks/usePaymentForm';
-import { SuccessScreen, BackButton } from '@/components';
+import { SuccessScreen, BackButton, ReceiptLightbox } from '@/components';
 
 type Step = 'select' | 'confirm' | 'success';
 
@@ -20,6 +20,16 @@ export default function NewPayment() {
   const [countdown, setCountdown] = useState(5);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+
+  // Receipt attachment states
+  const [receiptFile, setReceiptFile] = useState<File | null>(null);
+  const [receiptPreviewUrl, setReceiptPreviewUrl] = useState<string | null>(null);
+  const [uploadedReceiptUrl, setUploadedReceiptUrl] = useState<string | null>(null);
+  const [isUploadingReceipt, setIsUploadingReceipt] = useState(false);
+  const [receiptUploadError, setReceiptUploadError] = useState<string | null>(null);
+  const [isPreviewOpen, setIsPreviewOpen] = useState(false);
+  const [isDragOver, setIsDragOver] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [subscription, setSubscription] = useState<RecurringExpense | null>(null);
   const [loadingSub, setLoadingSub] = useState(false);
@@ -43,7 +53,7 @@ export default function NewPayment() {
 
   const currentUserId = currentUser?.id || '';
   const host = users.find((u) => u.id === (subscription ? subscription.creatorId : selectedHostId));
-  const hostName = host?.name || 'Unknown';
+  const hostName = host?.name || 'Host';
 
   const formatDate = (dateStr: string) => {
     if (!dateStr) return '';
@@ -101,7 +111,58 @@ export default function NewPayment() {
     return () => clearInterval(timer);
   }, [step, navigate]);
 
+  const handleFileSelect = async (file: File) => {
+    setReceiptUploadError(null);
+
+    // Validate type
+    const validTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/heic', 'image/heif'];
+    if (!validTypes.includes(file.type) && !file.type.startsWith('image/')) {
+      setReceiptUploadError('Please select a valid image file (JPEG, PNG, WebP).');
+      return;
+    }
+
+    // Validate size (max 10MB)
+    if (file.size > 10 * 1024 * 1024) {
+      setReceiptUploadError('Receipt image must be smaller than 10MB.');
+      return;
+    }
+
+    setReceiptFile(file);
+    const localUrl = URL.createObjectURL(file);
+    setReceiptPreviewUrl(localUrl);
+
+    // Upload to MinIO immediately
+    setIsUploadingReceipt(true);
+    try {
+      const res = await api.uploadPaymentReceipt(file);
+      setUploadedReceiptUrl(res.receiptUrl);
+    } catch (err: any) {
+      console.error('Failed to upload receipt:', err);
+      setReceiptUploadError(err?.message || 'Failed to upload receipt. Please try again.');
+    } finally {
+      setIsUploadingReceipt(false);
+    }
+  };
+
+  const handleRemoveReceipt = () => {
+    if (receiptPreviewUrl) {
+      URL.revokeObjectURL(receiptPreviewUrl);
+    }
+    setReceiptFile(null);
+    setReceiptPreviewUrl(null);
+    setUploadedReceiptUrl(null);
+    setReceiptUploadError(null);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+  };
+
   const handleConfirmPayment = async () => {
+    if (!uploadedReceiptUrl) {
+      setSubmitError('Please attach a receipt screenshot before submitting.');
+      return;
+    }
+
     setIsSubmitting(true);
     setSubmitError(null);
     try {
@@ -126,6 +187,7 @@ export default function NewPayment() {
         await api.createPayment({
           amount: totalAmount,
           payeeId: subscription.creatorId,
+          receiptUrl: uploadedReceiptUrl,
           expensesApplied: [],
           recurringItemsApplied,
         });
@@ -144,6 +206,7 @@ export default function NewPayment() {
         await api.createPayment({
           amount: parsedAmount,
           payeeId: selectedHostId,
+          receiptUrl: uploadedReceiptUrl,
           expensesApplied,
         });
       }
@@ -168,11 +231,7 @@ export default function NewPayment() {
     return (
       <SuccessScreen
         title="Payment Submitted"
-        message={
-          <>
-            The payment record has been submitted to <span className="font-semibold text-white">{hostName}</span> and is pending approval.
-          </>
-        }
+        message="The payment record has been submitted and is pending approval."
         countdown={countdown}
       />
     );
@@ -259,6 +318,127 @@ export default function NewPayment() {
               )}
             </div>
           </div>
+
+          {/* Receipt Attachment Section (Required) */}
+          <div className="pt-6 border-t border-zinc-800 space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <span className="text-sm font-semibold text-zinc-300 uppercase tracking-wider">Payment Receipt</span>
+                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-accent/10 text-accent border border-accent/20">
+                  REQUIRED
+                </span>
+              </div>
+              <span className="text-xs text-zinc-500">Attach transfer slip or QR screenshot</span>
+            </div>
+
+            {!receiptPreviewUrl ? (
+              <div
+                onDragOver={(e) => {
+                  e.preventDefault();
+                  setIsDragOver(true);
+                }}
+                onDragLeave={() => setIsDragOver(false)}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  setIsDragOver(false);
+                  const file = e.dataTransfer.files?.[0];
+                  if (file) handleFileSelect(file);
+                }}
+                onClick={() => fileInputRef.current?.click()}
+                className={`border-2 border-dashed rounded-2xl p-6 sm:p-8 text-center cursor-pointer transition-all flex flex-col items-center justify-center gap-3 ${
+                  isDragOver
+                    ? 'border-accent bg-accent/5 scale-[1.01]'
+                    : 'border-zinc-800 hover:border-zinc-700 bg-zinc-950/40 hover:bg-zinc-900/40'
+                }`}
+              >
+                <input
+                  type="file"
+                  ref={fileInputRef}
+                  accept="image/*"
+                  className="hidden"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) handleFileSelect(file);
+                  }}
+                />
+                <div className="w-12 h-12 rounded-2xl bg-zinc-900 border border-zinc-800 flex items-center justify-center text-zinc-400">
+                  <UploadCloud className="w-6 h-6 text-zinc-400" />
+                </div>
+                <div>
+                  <p className="text-sm font-medium text-white">
+                    Click to upload receipt <span className="text-zinc-500 font-normal sm:inline hidden">or drag and drop</span>
+                  </p>
+                  <p className="text-xs text-zinc-500 mt-1">
+                    Supports JPG, PNG, WebP up to 10MB
+                  </p>
+                </div>
+              </div>
+            ) : (
+              <div className="relative border border-zinc-800 rounded-2xl bg-zinc-950/60 p-4 flex items-center justify-between gap-4">
+                <div className="flex items-center gap-3.5 min-w-0">
+                  <div
+                    onClick={() => setIsPreviewOpen(true)}
+                    className="relative w-16 h-16 rounded-xl border border-zinc-700/80 bg-zinc-900 overflow-hidden shrink-0 cursor-pointer group shadow-sm"
+                  >
+                    <img
+                      src={receiptPreviewUrl}
+                      alt="Receipt preview"
+                      className="w-full h-full object-cover transition-transform duration-200 group-hover:scale-105"
+                    />
+                    <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                      <Eye className="w-4 h-4 text-white" />
+                    </div>
+                  </div>
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2">
+                      <p className="text-sm font-medium text-white truncate">
+                        {receiptFile?.name || 'Receipt Image'}
+                      </p>
+                      {isUploadingReceipt ? (
+                        <span className="text-[10px] text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded-full flex items-center gap-1 font-medium">
+                          Uploading...
+                        </span>
+                      ) : uploadedReceiptUrl ? (
+                        <span className="text-[10px] text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full flex items-center gap-1 font-medium">
+                          <Check className="w-3 h-3" /> Ready
+                        </span>
+                      ) : null}
+                    </div>
+                    <p className="text-xs text-zinc-500 mt-0.5">
+                      {receiptFile ? `${(receiptFile.size / (1024 * 1024)).toFixed(2)} MB` : ''} • Click preview to inspect
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2 shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => setIsPreviewOpen(true)}
+                    className="p-2 text-zinc-400 hover:text-white hover:bg-zinc-800/80 rounded-xl transition-colors cursor-pointer"
+                    title="Preview receipt"
+                  >
+                    <Eye className="w-4 h-4" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleRemoveReceipt}
+                    className="p-2 text-zinc-400 hover:text-red-400 hover:bg-red-500/10 rounded-xl transition-colors cursor-pointer"
+                    title="Remove receipt"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {receiptUploadError && (
+              <div className="p-3 bg-red-500/10 border border-red-500/20 rounded-xl text-red-400 text-xs flex items-center gap-2">
+                <AlertCircle className="w-4 h-4 shrink-0" />
+                <span>{receiptUploadError}</span>
+              </div>
+            )}
+          </div>
+
           <div className="pt-6 border-t border-zinc-800">
             <div className="flex justify-between items-end">
               <div>
@@ -274,13 +454,27 @@ export default function NewPayment() {
             </div>
           )}
           <button
-            disabled={isSubmitting}
+            disabled={isSubmitting || isUploadingReceipt || !uploadedReceiptUrl}
             onClick={handleConfirmPayment}
             className="w-full py-4 bg-accent text-accent-text font-bold rounded-xl hover:opacity-90 transition-opacity disabled:opacity-50 cursor-pointer"
           >
-            {isSubmitting ? 'Submitting...' : 'Confirm & Submit'}
+            {isSubmitting
+              ? 'Submitting...'
+              : isUploadingReceipt
+              ? 'Uploading Receipt...'
+              : !uploadedReceiptUrl
+              ? 'Attach Receipt to Continue'
+              : 'Confirm & Submit'}
           </button>
         </div>
+
+        <ReceiptLightbox
+          isOpen={isPreviewOpen}
+          onClose={() => setIsPreviewOpen(false)}
+          receiptUrl={receiptPreviewUrl || uploadedReceiptUrl}
+          title="Payment Receipt Preview"
+          amount={finalAmount}
+        />
       </div>
     );
   }
@@ -317,7 +511,7 @@ export default function NewPayment() {
                         </span>
                       </div>
                       <div className="text-xs sm:text-sm text-zinc-500">
-                        Recurring Subscription &bull; Hosted by {host?.name || 'Unknown'}
+                        Recurring Subscription &bull; Hosted by {host?.name || 'Host'}
                       </div>
                     </div>
                   </div>
@@ -373,7 +567,7 @@ export default function NewPayment() {
                         </span>
                       </div>
                       <div className={`text-xs sm:text-sm ${isDisabled ? 'text-zinc-600' : 'text-zinc-500'}`}>
-                        {formatDate(expense.date)} &bull; Hosted by {host?.name || 'Unknown'}
+                        {formatDate(expense.date)} &bull; Hosted by {host?.name || expense.creatorName || 'Host'}
                         {paidAmount > 0 && (
                           <span className="text-zinc-400 ml-2">
                             (RM {paidAmount.toFixed(2)} paid of RM {totalShare.toFixed(2)})

@@ -12,3 +12,4 @@ export { ParticipantPicker } from './ui/ParticipantPicker';
 export { SuccessScreen } from './ui/SuccessScreen';
 export { InfoBanner } from './ui/InfoBanner';
 export { SonarGrid } from './ui/sonar-grid';
+export { ReceiptLightbox } from './ui/ReceiptLightbox';

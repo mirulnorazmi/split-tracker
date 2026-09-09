@@ -1,9 +1,9 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Edit2, Check, X, CreditCard, Calendar, User, ChevronRight, Clock, Trash2 } from 'lucide-react';
+import { useParams, useNavigate, Link } from 'react-router-dom';
+import { ArrowLeft, Edit2, Check, X, CreditCard, Calendar, User, ChevronRight, Clock, Trash2, Folder as FolderIcon } from 'lucide-react';
 import { useAuth } from '@/app/AuthContext';
 import { useExpense, useCategories, useUsers, usePayments } from '@/lib/hooks/useData';
-import { api } from '@/lib/api';
+import { api, Folder } from '@/lib/api';
 import { getUserShare, getUserPaidAmount, getUserPendingAmount, getUserRemainingShare } from '@/lib/utils/expense';
 import { cn } from '@/lib/utils/cn';
 import { useExpenseForm } from '@/features/expenses/hooks/useExpenseForm';
@@ -31,6 +31,21 @@ export default function ExpenseDetails({ expenseId: propExpenseId, onBack }: Exp
 
   const [saveLoading, setSaveLoading] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [selectedFolderId, setSelectedFolderId] = useState<string>('');
+  const [folders, setFolders] = useState<Folder[]>([]);
+
+  useEffect(() => {
+    api.listFolders().then((data) => {
+      const myFolders = data.filter((f) => currentUser?.role === 'Admin' || f.createdBy === currentUser?.id);
+      setFolders(myFolders);
+    }).catch(console.error);
+  }, [currentUser]);
+
+  useEffect(() => {
+    if (expense) {
+      setSelectedFolderId(expense.folderId || '');
+    }
+  }, [expense]);
 
   // Filters for payment history
   const [payerFilter, setPayerFilter] = useState<string>('all');
@@ -101,6 +116,7 @@ export default function ExpenseDetails({ expenseId: propExpenseId, onBack }: Exp
         title: form.title,
         totalAmount: form.numAmount,
         categoryId: form.selectedCategory,
+        folderId: selectedFolderId || null,
         participants,
       });
 
@@ -351,16 +367,34 @@ export default function ExpenseDetails({ expenseId: propExpenseId, onBack }: Exp
             </div>
           </div>
 
-          <div>
-            <label className="block text-sm font-medium text-zinc-300 mb-2">Total Amount (RM)</label>
-            <input
-              type="text"
-              inputMode="numeric"
-              value={form.amount}
-              onChange={(e) => form.handleAmountChange(e.target.value)}
-              placeholder="0.00"
-              className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-zinc-600 transition-colors placeholder:text-zinc-600"
-            />
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6">
+            <div>
+              <label className="block text-sm font-medium text-zinc-300 mb-2">Total Amount (RM)</label>
+              <input
+                type="text"
+                inputMode="numeric"
+                value={form.amount}
+                onChange={(e) => form.handleAmountChange(e.target.value)}
+                placeholder="0.00"
+                className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-zinc-600 transition-colors placeholder:text-zinc-600"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-zinc-300 mb-2 flex items-center gap-1.5">
+                <FolderIcon className="w-3.5 h-3.5 text-accent" />
+                Folder / Group (Optional)
+              </label>
+              <select
+                value={selectedFolderId}
+                onChange={(e) => setSelectedFolderId(e.target.value)}
+                className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-zinc-600 transition-colors text-sm appearance-none cursor-pointer"
+              >
+                <option value="">None (Standalone Expense)</option>
+                {folders.map((f) => (
+                  <option key={f.id} value={f.id}>{f.name} ({f.category || 'General'})</option>
+                ))}
+              </select>
+            </div>
           </div>
 
           <ParticipantPicker
@@ -437,6 +471,15 @@ export default function ExpenseDetails({ expenseId: propExpenseId, onBack }: Exp
             <span className="px-2.5 py-0.5 rounded-full text-[10px] sm:text-xs font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 flex items-center gap-1">
               <Check className="w-3 h-3" /> CONFIRMED
             </span>
+          )}
+          {expense.folderId && (
+            <Link
+              to={`/folders/${expense.folderId}`}
+              className="px-2.5 py-0.5 rounded-full text-[10px] sm:text-xs font-semibold bg-zinc-800 text-zinc-300 hover:text-white border border-zinc-700 flex items-center gap-1.5 transition-colors cursor-pointer"
+            >
+              <FolderIcon className="w-3 h-3 text-accent" />
+              {expense.folderName || 'Folder'}
+            </Link>
           )}
         </div>
         <h1 className="text-2xl sm:text-3xl lg:text-4xl font-light text-white tracking-tight">{expense.title}</h1>

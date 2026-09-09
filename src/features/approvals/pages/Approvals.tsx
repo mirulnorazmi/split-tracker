@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useExpenses, usePayments, useUsers } from '@/lib/hooks/useData';
-import { api } from '@/lib/api';
-import { Check, CreditCard, FileText, ChevronLeft, ChevronRight } from 'lucide-react';
+import { api, getReceiptUrl } from '@/lib/api';
+import { Check, CreditCard, FileText, ChevronLeft, ChevronRight, Eye, Image as ImageIcon } from 'lucide-react';
 import { cn } from '@/lib/utils/cn';
+import { ReceiptLightbox } from '@/components';
 
 export default function Approvals() {
   const navigate = useNavigate();
@@ -13,6 +14,7 @@ export default function Approvals() {
   const { users } = useUsers();
   const [actionLoadingId, setActionLoadingId] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [selectedReceiptPayment, setSelectedReceiptPayment] = useState<any | null>(null);
   
   const [page, setPage] = useState(1);
   const ITEMS_PER_PAGE = 10;
@@ -180,13 +182,46 @@ export default function Approvals() {
                     className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-4 sm:p-5 rounded-2xl border border-zinc-800 bg-zinc-950/50 hover:border-zinc-700 transition-colors cursor-pointer group"
                   >
                     <div className="flex items-start gap-3 sm:gap-4">
-                      <div className="w-10 h-10 rounded-full bg-zinc-900 border border-zinc-800 flex items-center justify-center text-zinc-400 shrink-0 mt-1">
-                        <CreditCard className="w-5 h-5" />
-                      </div>
+                      {payment.receiptUrl ? (
+                        <div
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setSelectedReceiptPayment(payment);
+                          }}
+                          title="Click to preview receipt"
+                          className="relative w-12 h-12 rounded-xl border border-zinc-700 bg-zinc-900 overflow-hidden shrink-0 cursor-pointer group/thumb shadow-sm"
+                        >
+                          <img
+                            src={getReceiptUrl(payment.receiptUrl)}
+                            alt="Receipt"
+                            loading="lazy"
+                            className="w-full h-full object-cover transition-transform duration-200 group-hover/thumb:scale-110"
+                          />
+                          <div className="absolute inset-0 bg-black/40 opacity-0 group-hover/thumb:opacity-100 transition-opacity flex items-center justify-center">
+                            <Eye className="w-3.5 h-3.5 text-white" />
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="w-10 h-10 rounded-full bg-zinc-900 border border-zinc-800 flex items-center justify-center text-zinc-400 shrink-0 mt-1">
+                          <CreditCard className="w-5 h-5" />
+                        </div>
+                      )}
                       <div>
                         <div className="flex items-center gap-2 sm:gap-3 mb-1 flex-wrap">
                           <h3 className="text-white font-medium text-base sm:text-lg group-hover:text-accent transition-colors">Payment to {payment.payeeName || payee?.name || 'Unknown'}</h3>
                           <span className="px-2 sm:px-2.5 py-0.5 rounded-full text-[10px] sm:text-xs font-semibold bg-amber-500/10 text-amber-500 border border-amber-500/20">PENDING</span>
+                          {payment.receiptUrl && (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setSelectedReceiptPayment(payment);
+                              }}
+                              className="px-2 py-0.5 rounded-full text-[10px] font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 flex items-center gap-1 hover:bg-emerald-500/20 transition-colors cursor-pointer"
+                            >
+                              <ImageIcon className="w-3 h-3" /> Receipt Attached
+                            </button>
+                          )}
                         </div>
                         <div className="text-xs sm:text-sm text-zinc-400">
                           Paid by <span className="text-zinc-300">{payment.payerName || payer?.name || 'Unknown'}</span> • {formatDate(payment.date)}
@@ -196,6 +231,18 @@ export default function Approvals() {
                     <div className="flex flex-col sm:items-end gap-3 sm:gap-4 ml-14 sm:ml-0">
                       <div className="text-xl sm:text-2xl font-semibold text-white">RM {Number(payment.amount).toFixed(2)}</div>
                       <div className="flex gap-2 w-full sm:w-auto">
+                        {payment.receiptUrl && (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setSelectedReceiptPayment(payment);
+                            }}
+                            className="px-3 py-2 rounded-lg bg-zinc-900 border border-zinc-800 text-zinc-300 hover:text-white hover:bg-zinc-800 text-xs sm:text-sm font-medium transition-colors flex items-center gap-1.5 cursor-pointer"
+                          >
+                            <Eye className="w-3.5 h-3.5" /> View Receipt
+                          </button>
+                        )}
                         <button
                           disabled={isActing}
                           onClick={(e) => {
@@ -245,6 +292,15 @@ export default function Approvals() {
           </div>
         )}
       </div>
+
+      <ReceiptLightbox
+        isOpen={!!selectedReceiptPayment}
+        onClose={() => setSelectedReceiptPayment(null)}
+        receiptUrl={selectedReceiptPayment?.receiptUrl}
+        title={`Payment Receipt - RM ${Number(selectedReceiptPayment?.amount || 0).toFixed(2)}`}
+        payerName={selectedReceiptPayment?.payerName}
+        amount={Number(selectedReceiptPayment?.amount || 0)}
+      />
     </div>
   );
 }

@@ -125,6 +125,8 @@ export default async function avatarRoutes(fastify: FastifyInstance) {
 
         reply.header('Content-Type', stat.metaData?.['content-type'] || 'image/jpeg');
         reply.header('Cache-Control', 'public, max-age=31536000, immutable');
+        reply.header('Access-Control-Allow-Origin', '*');
+        reply.header('Cross-Origin-Resource-Policy', 'cross-origin');
         return reply.send(stream);
       } catch {
         // Try next candidate key

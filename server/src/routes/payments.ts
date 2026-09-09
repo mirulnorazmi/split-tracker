@@ -1,9 +1,56 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
+import crypto from 'crypto';
+import { Client } from 'minio';
+import { config } from '../config.js';
 import { query, getClient } from '../db/pool.js';
+
+const minioClient = new Client({
+  endPoint: config.minio.endpoint,
+  port: config.minio.port,
+  useSSL: config.minio.useSSL,
+  accessKey: config.minio.accessKey,
+  secretKey: config.minio.secretKey,
+});
+
+const RECEIPT_BUCKET = config.minio.receiptBucket;
+
+async function ensureReceiptBucket() {
+  try {
+    const exists = await minioClient.bucketExists(RECEIPT_BUCKET);
+    if (!exists) {
+      await minioClient.makeBucket(RECEIPT_BUCKET, 'us-east-1');
+      console.log(`[minio] Created bucket: ${RECEIPT_BUCKET}`);
+    } else {
+      console.log(`[minio] Bucket "${RECEIPT_BUCKET}" is ready.`);
+    }
+
+    const readOnlyPolicy = {
+      Version: '2012-10-17',
+      Statement: [
+        {
+          Effect: 'Allow',
+          Principal: '*',
+          Action: ['s3:GetObject'],
+          Resource: [`arn:aws:s3:::${RECEIPT_BUCKET}/*`],
+        },
+      ],
+    };
+
+    try {
+      await minioClient.setBucketPolicy(RECEIPT_BUCKET, JSON.stringify(readOnlyPolicy));
+      console.log(`[minio] Set public read policy for "${RECEIPT_BUCKET}"`);
+    } catch (policyErr) {
+      console.warn(`[minio] Note: receipt bucket policy:`, (policyErr as Error).message);
+    }
+  } catch (err) {
+    console.warn(`[minio] Warning: Could not connect to receipt bucket (${RECEIPT_BUCKET}):`, (err as Error).message);
+  }
+}
 
 interface CreatePaymentBody {
   amount: number;
   payeeId: string;
+  receiptUrl: string;
   expensesApplied?: { expenseId: string; amountApplied: number }[];
   recurringItemsApplied?: { cycleItemId: string; amountApplied: number }[];
 }
@@ -13,16 +60,116 @@ interface UpdateStatusBody {
 }
 
 export default async function paymentRoutes(fastify: FastifyInstance) {
+  ensureReceiptBucket().catch((err) => console.warn('[minio] Receipt bucket check error:', err.message));
+
+  /**
+   * POST /payments/receipt
+   * Authenticated — upload a payment receipt image/screenshot
+   * Stores in MinIO in bucket "og-bucket" under "receipts/" path
+   */
+  fastify.post('/payments/receipt', { preHandler: [fastify.authenticate] }, async (request: FastifyRequest, reply: FastifyReply) => {
+    const { id: userId } = request.user as { id: string };
+
+    const data = await request.file();
+    if (!data) {
+      return reply.status(400).send({ error: 'Bad Request', message: 'No receipt file uploaded' });
+    }
+
+    // Validate file type
+    const allowedTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/heic', 'image/heif'];
+    if (!allowedTypes.includes(data.mimetype) && !data.mimetype.startsWith('image/')) {
+      return reply.status(400).send({ error: 'Bad Request', message: 'File must be an image (JPEG, PNG, WebP)' });
+    }
+
+    // Max 10MB
+    const maxSize = 10 * 1024 * 1024;
+    const chunks: Buffer[] = [];
+    let totalSize = 0;
+
+    for await (const chunk of data.file) {
+      totalSize += chunk.length;
+      if (totalSize > maxSize) {
+        return reply.status(400).send({ error: 'Bad Request', message: 'File too large (max 10MB)' });
+      }
+      chunks.push(chunk);
+    }
+
+    const buffer = Buffer.concat(chunks);
+    let ext = data.mimetype.split('/')[1] || 'jpg';
+    if (ext === 'jpeg') ext = 'jpg';
+    const timestamp = Date.now();
+    const randomSuffix = crypto.randomUUID().slice(0, 8);
+    const fileName = `receipt_${userId}_${timestamp}_${randomSuffix}.${ext}`;
+    // Store in og-bucket under "receipts/"
+    const objectName = `receipts/${fileName}`;
+
+    await minioClient.putObject(RECEIPT_BUCKET, objectName, buffer, buffer.length, {
+      'Content-Type': data.mimetype,
+    });
+
+    const receiptUrl = `/receipts/${fileName}`;
+
+    return reply.send({
+      receiptUrl,
+      objectName,
+      message: 'Receipt uploaded successfully.',
+    });
+  });
+
+  /**
+   * GET /receipts/*
+   * Public — stream receipt from MinIO with immutable cache headers and ETag validation
+   */
+  fastify.get('/receipts/*', async (request: FastifyRequest, reply: FastifyReply) => {
+    const rawPath = (request.params as Record<string, string>)['*'] || '';
+    if (!rawPath) {
+      return reply.status(400).send({ error: 'Bad Request', message: 'Receipt path required' });
+    }
+
+    // Support both "receipts/filename.jpg" and "filename.jpg"
+    const cleanFileName = rawPath.replace(/^receipts\//, '').replace(/^receipts\//, '');
+    const candidateKeys = [`receipts/${cleanFileName}`, cleanFileName, rawPath];
+
+    for (const key of candidateKeys) {
+      try {
+        const stat = await minioClient.statObject(RECEIPT_BUCKET, key);
+        const etag = stat.etag ? `"${stat.etag.replace(/"/g, '')}"` : undefined;
+
+        if (etag && request.headers['if-none-match'] === etag) {
+          return reply.status(304).send();
+        }
+
+        const stream = await minioClient.getObject(RECEIPT_BUCKET, key);
+
+        reply.header('Content-Type', stat.metaData?.['content-type'] || 'image/jpeg');
+        reply.header('Cache-Control', 'public, max-age=31536000, immutable');
+        reply.header('Access-Control-Allow-Origin', '*');
+        reply.header('Cross-Origin-Resource-Policy', 'cross-origin');
+        if (etag) reply.header('ETag', etag);
+        if (stat.size) reply.header('Content-Length', stat.size);
+        return reply.send(stream);
+      } catch {
+        // Try next candidate key
+      }
+    }
+
+    return reply.status(404).send({ error: 'Not Found', message: 'Receipt image not found' });
+  });
+
   /**
    * POST /payments
    * Authenticated — submit a new payment (status: Pending)
    */
   fastify.post('/payments', { preHandler: [fastify.authenticate] }, async (request: FastifyRequest, reply: FastifyReply) => {
     const { id: payerId } = request.user as { id: string };
-    const { amount, payeeId, expensesApplied = [], recurringItemsApplied = [] } = request.body as CreatePaymentBody;
+    const { amount, payeeId, receiptUrl, expensesApplied = [], recurringItemsApplied = [] } = request.body as CreatePaymentBody;
 
     if (!amount || !payeeId || (expensesApplied.length === 0 && recurringItemsApplied.length === 0)) {
       return reply.status(400).send({ error: 'Bad Request', message: 'amount, payeeId, and at least one expense or recurring item are required' });
+    }
+
+    if (!receiptUrl || typeof receiptUrl !== 'string' || !receiptUrl.trim()) {
+      return reply.status(400).send({ error: 'Bad Request', message: 'Receipt screenshot or image is required to submit a payment' });
     }
 
     // Validate amounts
@@ -109,10 +256,10 @@ export default async function paymentRoutes(fastify: FastifyInstance) {
       }
 
       const { rows: [payment] } = await client.query(
-        `INSERT INTO payment (amount, payer_id, payee_id, status)
-         VALUES ($1, $2, $3, 'Pending')
-         RETURNING id, date, amount, payer_id AS "payerId", payee_id AS "payeeId", status`,
-        [amount, payerId, payeeId]
+        `INSERT INTO payment (amount, payer_id, payee_id, receipt_url, status)
+         VALUES ($1, $2, $3, $4, 'Pending')
+         RETURNING id, date, amount, payer_id AS "payerId", payee_id AS "payeeId", receipt_url AS "receiptUrl", status`,
+        [amount, payerId, payeeId, receiptUrl.trim()]
       );
 
       for (const ea of expensesApplied) {
@@ -134,21 +281,28 @@ export default async function paymentRoutes(fastify: FastifyInstance) {
       await client.query('COMMIT');
 
       const { rows: [full] } = await client.query(
-        `SELECT p.*,
-           COALESCE(
-             (SELECT json_agg(json_build_object('expenseId', epm.expense_id, 'amountApplied', epm.amount_applied))
-              FROM expense_payment epm WHERE epm.payment_id = p.id),
-             '[]'
-           ) AS "expensesApplied",
-           COALESCE(
-             (SELECT json_agg(json_build_object('cycleItemId', rci.id, 'amountApplied', rci.amount_due, 'title', re.title))
-              FROM recurring_cycle_item rci
-              JOIN recurring_cycle rc ON rc.id = rci.cycle_id
-              JOIN recurring_expense re ON re.id = rc.recurring_expense_id
-              WHERE rci.payment_id = p.id),
-             '[]'
-           ) AS "recurringItemsApplied"
+        `SELECT p.id, p.date, p.confirmed_date AS "confirmedDate", p.amount,
+                p.payer_id AS "payerId", p.payee_id AS "payeeId", p.status,
+                p.receipt_url AS "receiptUrl",
+                p.confirmed_by AS "confirmedById", approver.name AS "confirmedByName",
+                payer.name AS "payerName", payee.name AS "payeeName",
+                COALESCE(
+                  (SELECT json_agg(json_build_object('expenseId', epm.expense_id, 'amountApplied', epm.amount_applied))
+                   FROM expense_payment epm WHERE epm.payment_id = p.id),
+                  '[]'
+                ) AS "expensesApplied",
+                COALESCE(
+                  (SELECT json_agg(json_build_object('cycleItemId', rci.id, 'amountApplied', rci.amount_due, 'title', re.title, 'periodKey', rc.period_key))
+                   FROM recurring_cycle_item rci
+                   JOIN recurring_cycle rc ON rc.id = rci.cycle_id
+                   JOIN recurring_expense re ON re.id = rc.recurring_expense_id
+                   WHERE rci.payment_id = p.id),
+                  '[]'
+                ) AS "recurringItemsApplied"
          FROM payment p
+         JOIN "user" payer ON payer.id = p.payer_id
+         JOIN "user" payee ON payee.id = p.payee_id
+         LEFT JOIN "user" approver ON approver.id = p.confirmed_by
          WHERE p.id = $1`,
         [payment.id]
       );
@@ -198,6 +352,7 @@ export default async function paymentRoutes(fastify: FastifyInstance) {
     const { rows } = await query(
       `SELECT p.id, p.date, p.confirmed_date AS "confirmedDate", p.amount,
               p.payer_id AS "payerId", p.payee_id AS "payeeId", p.status,
+              p.receipt_url AS "receiptUrl",
               p.confirmed_by AS "confirmedById", approver.name AS "confirmedByName",
               payer.name AS "payerName", payee.name AS "payeeName",
               COALESCE(
@@ -223,6 +378,46 @@ export default async function paymentRoutes(fastify: FastifyInstance) {
     );
 
     return reply.send(rows);
+  });
+
+  /**
+   * GET /payments/:id
+   * Authenticated — retrieve single payment record
+   */
+  fastify.get('/payments/:id', { preHandler: [fastify.authenticate] }, async (request: FastifyRequest, reply: FastifyReply) => {
+    const { id } = request.params as { id: string };
+    const { rows } = await query(
+      `SELECT p.id, p.date, p.confirmed_date AS "confirmedDate", p.amount,
+              p.payer_id AS "payerId", p.payee_id AS "payeeId", p.status,
+              p.receipt_url AS "receiptUrl",
+              p.confirmed_by AS "confirmedById", approver.name AS "confirmedByName",
+              payer.name AS "payerName", payee.name AS "payeeName",
+              COALESCE(
+                (SELECT json_agg(json_build_object('expenseId', epm.expense_id, 'amountApplied', epm.amount_applied))
+                 FROM expense_payment epm WHERE epm.payment_id = p.id),
+                '[]'
+              ) AS "expensesApplied",
+              COALESCE(
+                (SELECT json_agg(json_build_object('cycleItemId', rci.id, 'amountApplied', rci.amount_due, 'title', re.title, 'periodKey', rc.period_key))
+                 FROM recurring_cycle_item rci
+                 JOIN recurring_cycle rc ON rc.id = rci.cycle_id
+                 JOIN recurring_expense re ON re.id = rc.recurring_expense_id
+                 WHERE rci.payment_id = p.id),
+                '[]'
+              ) AS "recurringItemsApplied"
+       FROM payment p
+       JOIN "user" payer ON payer.id = p.payer_id
+       JOIN "user" payee ON payee.id = p.payee_id
+       LEFT JOIN "user" approver ON approver.id = p.confirmed_by
+       WHERE p.id = $1`,
+      [id]
+    );
+
+    if (rows.length === 0) {
+      return reply.status(404).send({ error: 'Not Found', message: 'Payment not found' });
+    }
+
+    return reply.send(rows[0]);
   });
 
   /**
