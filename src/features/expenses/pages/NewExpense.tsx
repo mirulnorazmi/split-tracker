@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { ArrowLeft, Shield, Folder as FolderIcon } from 'lucide-react';
+import { ArrowLeft, Folder as FolderIcon, Calendar, Shield } from 'lucide-react';
 import { useAuth } from '@/app/AuthContext';
 import { useCategories, useUsers } from '@/lib/hooks/useData';
 import { api, Folder } from '@/lib/api';
 import { useExpenseForm } from '@/features/expenses/hooks/useExpenseForm';
 import { ParticipantPicker, SuccessScreen, BackButton } from '@/components';
+import { formatDate } from '@/lib/utils/formatDate';
 
 type Step = 'form' | 'confirm' | 'success';
 
@@ -94,6 +95,7 @@ export default function NewExpense() {
         totalAmount: form.numAmount,
         categoryId: form.selectedCategory,
         folderId: selectedFolderId || undefined,
+        date: form.date ? new Date(form.date).toISOString() : undefined,
         participants,
       });
 
@@ -106,18 +108,18 @@ export default function NewExpense() {
   };
 
   if (step === 'success') {
-    const isAdmin = currentUser?.role === 'Admin';
+    const isPending = currentUser?.role !== 'Admin';
     return (
       <SuccessScreen
-        title={isAdmin ? 'Expense Recorded' : 'Request Submitted'}
+        title={isPending ? 'Request Submitted' : 'Expense Recorded'}
         message={
-          isAdmin ? (
+          isPending ? (
             <>
-              Your expense for <span className="font-semibold text-white">{form.title}</span> has been recorded and is now active.
+              Your request for <span className="font-semibold text-white">{form.title}</span> has been submitted for administrator review.
             </>
           ) : (
             <>
-              Your expense request for <span className="font-semibold text-white">{form.title}</span> has been submitted and is pending admin approval.
+              Your expense for <span className="font-semibold text-white">{form.title}</span> has been recorded and is now active.
             </>
           )
         }
@@ -143,8 +145,9 @@ export default function NewExpense() {
               <div>
                 <h3 className="text-sm font-semibold text-zinc-500 uppercase tracking-wider mb-1">Expense Details</h3>
                 <div className="text-2xl font-medium text-white">{form.title}</div>
-                <div className="text-sm text-zinc-400 mt-1">
-                  {new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}
+                <div className="text-sm text-zinc-400 mt-1 flex items-center gap-1.5">
+                  <Calendar className="w-3.5 h-3.5 text-zinc-500" />
+                  <span>Date of Event: <strong className="text-zinc-200 font-medium">{formatDate(form.date)}</strong></span>
                 </div>
               </div>
               {selectedCategoryData && (
@@ -214,18 +217,20 @@ export default function NewExpense() {
       </header>
 
       <p className="text-zinc-400 text-sm sm:text-base">
-        Choose a category, enter the amount, and select who participated. An administrator will review your request.
+        Choose a category, enter the amount, select the event date, and assign participants to split the expense.
       </p>
 
-      <div className="p-4 rounded-xl border border-indigo-500/20 bg-indigo-500/5 flex gap-3 sm:gap-4">
-        <div className="w-10 h-10 rounded-full bg-indigo-500/10 flex items-center justify-center shrink-0">
-          <Shield className="w-5 h-5 text-indigo-400" />
+      {currentUser?.role !== 'Admin' && (
+        <div className="p-4 rounded-xl border border-indigo-500/20 bg-indigo-500/5 flex gap-3 sm:gap-4">
+          <div className="w-10 h-10 rounded-full bg-indigo-500/10 flex items-center justify-center shrink-0">
+            <Shield className="w-5 h-5 text-indigo-400" />
+          </div>
+          <div>
+            <h4 className="font-semibold text-indigo-200 mb-1">Admin approval required</h4>
+            <p className="text-sm text-indigo-400/80">The details you submit will be reviewed by an administrator before the expense becomes active and balances are updated.</p>
+          </div>
         </div>
-        <div>
-          <h4 className="font-semibold text-indigo-200 mb-1">Admin approval required</h4>
-          <p className="text-sm text-indigo-400/80">The details you submit will be reviewed by an administrator before the expense becomes active and balances are updated.</p>
-        </div>
-      </div>
+      )}
 
       <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-4 sm:p-6 space-y-6 sm:space-y-8">
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6">
@@ -267,20 +272,33 @@ export default function NewExpense() {
           </div>
           <div>
             <label className="block text-sm font-medium text-zinc-300 mb-2 flex items-center gap-1.5">
-              <FolderIcon className="w-3.5 h-3.5 text-accent" />
-              Folder / Group (Optional)
+              <Calendar className="w-3.5 h-3.5 text-zinc-400" />
+              Date of Event
             </label>
-            <select
-              value={selectedFolderId}
-              onChange={(e) => setSelectedFolderId(e.target.value)}
-              className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-zinc-600 transition-colors text-sm appearance-none cursor-pointer"
-            >
-              <option value="">None (Standalone Expense)</option>
-              {folders.map((f) => (
-                <option key={f.id} value={f.id}>{f.name} ({f.category || 'General'})</option>
-              ))}
-            </select>
+            <input
+              type="date"
+              value={form.date}
+              onChange={(e) => form.setDate(e.target.value)}
+              className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-zinc-600 transition-colors text-sm [color-scheme:dark] cursor-pointer"
+            />
           </div>
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium text-zinc-300 mb-2 flex items-center gap-1.5">
+            <FolderIcon className="w-3.5 h-3.5 text-accent" />
+            Folder / Group (Optional)
+          </label>
+          <select
+            value={selectedFolderId}
+            onChange={(e) => setSelectedFolderId(e.target.value)}
+            className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-zinc-600 transition-colors text-sm appearance-none cursor-pointer"
+          >
+            <option value="">None (Standalone Expense)</option>
+            {folders.map((f) => (
+              <option key={f.id} value={f.id}>{f.name} ({f.category || 'General'})</option>
+            ))}
+          </select>
         </div>
 
         <ParticipantPicker
@@ -323,7 +341,13 @@ export default function NewExpense() {
             </div>
             <div className="flex justify-between pt-3 border-t border-zinc-800/50">
               <span className="text-zinc-500">Status after submission</span>
-              <span className="text-[10px] uppercase font-bold tracking-wider bg-amber-500/10 text-amber-500 px-2 py-1 rounded-full">Pending approval</span>
+              <span className={`text-[10px] uppercase font-bold tracking-wider px-2 py-1 rounded-full ${
+                currentUser?.role === 'Admin'
+                  ? 'bg-emerald-500/10 text-emerald-500'
+                  : 'bg-amber-500/10 text-amber-500'
+              }`}>
+                {currentUser?.role === 'Admin' ? 'Active / Confirmed' : 'Pending approval'}
+              </span>
             </div>
           </div>
         </div>

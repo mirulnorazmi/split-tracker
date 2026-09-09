@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import { ArrowRight, Plus, Search, X, Trash2, ChevronLeft, ChevronRight, Folder as FolderIcon } from 'lucide-react';
+import { ArrowRight, Plus, Search, X, Trash2, ChevronLeft, ChevronRight, Folder as FolderIcon, Calendar } from 'lucide-react';
 import { useAuth } from '@/app/AuthContext';
 import { useExpenses, usePayments, useCategories, useUsers } from '@/lib/hooks/useData';
 import { isExpenseClosed, getUserShare, getUserPaidAmount, getUserPendingAmount, getUserRemainingShare } from '@/lib/utils/expense';
@@ -56,10 +56,11 @@ export default function Expenses() {
     return exp.participants.some((p: any) => (typeof p === 'string' ? p === uid : p.userId === uid));
   };
 
-  const baseExpenses =
+  const baseExpenses = (
     listTab === 'all'
       ? expenses.filter((exp) => isParticipant(exp, currentUserId) || exp.creatorId === currentUserId)
-      : expenses.filter((exp) => exp.creatorId === currentUserId);
+      : expenses.filter((exp) => exp.creatorId === currentUserId)
+  ).filter((exp) => isAdmin || exp.creatorId === currentUserId || exp.status === 'Confirmed');
 
   const filteredExpenses = baseExpenses.filter((expense) => {
     if (searchQuery && !expense.title.toLowerCase().includes(searchQuery.toLowerCase())) {
@@ -247,18 +248,28 @@ export default function Expenses() {
                         )}
                       </div>
                       <div className="text-[11px] sm:text-xs text-zinc-500 mb-1 sm:mb-2 flex flex-wrap items-center gap-1.5">
-                        <span>Created on {formatDate(expense.date)}</span>
+                        <span className="flex items-center gap-1">
+                          <Calendar className="w-3 h-3 text-zinc-400" />
+                          <span>Event: <strong className="text-zinc-300 font-normal">{formatDate(expense.date)}</strong></span>
+                        </span>
                         <span>•</span>
                         <span>{numParticipants} people</span>
                         {expense.approvedByName && (
                           <>
                             <span>•</span>
-                            <span className="text-zinc-400">Approved by {expense.approvedByName}</span>
+                            <span className="text-zinc-400">
+                              {expense.status === 'Rejected' ? 'Rejected' : 'Approved'} by {expense.approvedByName}
+                            </span>
                           </>
                         )}
                         {expense.status === 'Pending' && (
                           <span className="px-1.5 py-0.5 rounded text-[9px] font-semibold bg-amber-500/10 text-amber-400 border border-amber-500/20">
                             Pending
+                          </span>
+                        )}
+                        {expense.status === 'Rejected' && (
+                          <span className="px-1.5 py-0.5 rounded text-[9px] font-semibold bg-red-500/10 text-red-400 border border-red-500/20">
+                            Rejected
                           </span>
                         )}
                         {expense.folderName && (
@@ -309,11 +320,11 @@ export default function Expenses() {
                         </div>
                       )}
                     </div>
-                    {isAdmin && (
+                    {(isAdmin || isCreator) && (
                       <button
                         type="button"
                         onClick={(e) => handleDeleteExpense(e, expense.id, expense.title)}
-                        title="Delete expense (Admin only)"
+                        title="Delete expense"
                         className="p-1.5 sm:p-2 rounded-lg text-zinc-500 hover:text-red-400 hover:bg-red-500/10 border border-transparent hover:border-red-500/20 transition-colors cursor-pointer"
                       >
                         <Trash2 className="w-4 h-4" />

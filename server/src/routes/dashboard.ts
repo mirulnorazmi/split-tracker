@@ -180,21 +180,19 @@ export default async function dashboardRoutes(fastify: FastifyInstance) {
 
   /**
    * GET /admin/pending-counts
-   * Authenticated — returns lightweight pending counts for admin badges without downloading full records
+   * Authenticated — returns lightweight pending counts for badges without downloading full records
    */
   fastify.get('/admin/pending-counts', { preHandler: [fastify.authenticate] }, async (request: FastifyRequest, reply: FastifyReply) => {
-    const { role } = request.user as { role: string };
-    if (role !== 'Admin') {
-      return reply.send({ pendingApprovals: 0, pendingUsers: 0 });
-    }
+    const { role, id: userId } = request.user as { role: string; id: string };
 
     const { rows: [counts] } = await query(
       `SELECT
          (
-           (SELECT COUNT(*)::int FROM expense WHERE status = 'Pending') +
-           (SELECT COUNT(*)::int FROM payment WHERE status = 'Pending')
+           (CASE WHEN $1 = 'Admin' THEN (SELECT COUNT(*)::int FROM expense WHERE status = 'Pending') ELSE 0 END) +
+           (SELECT COUNT(*)::int FROM payment WHERE status = 'Pending' AND payee_id = $2)
          ) AS "pendingApprovals",
-         (SELECT COUNT(*)::int FROM "user" WHERE status = 'Pending') AS "pendingUsers"`
+         (CASE WHEN $1 = 'Admin' THEN (SELECT COUNT(*)::int FROM "user" WHERE status = 'Pending') ELSE 0 END) AS "pendingUsers"`,
+      [role, userId]
     );
 
     return reply.send(counts || { pendingApprovals: 0, pendingUsers: 0 });

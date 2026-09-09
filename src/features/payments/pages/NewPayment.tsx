@@ -72,7 +72,7 @@ export default function NewPayment() {
       api.getRecurring(subscriptionId)
         .then((res) => {
           setSubscription(res);
-          if (res.userSummary?.totalUnpaid && res.userSummary.totalUnpaid > 0) {
+          if (res.userSummary?.unpaidCycles && res.userSummary.unpaidCycles.length > 0) {
             setStep('confirm');
             const now = new Date();
             const currentPeriodKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
@@ -92,7 +92,7 @@ export default function NewPayment() {
         .catch(console.error)
         .finally(() => setLoadingSubList(false));
     }
-  }, [subscriptionId]);
+  }, [subscriptionId, currentUserId]);
 
   useEffect(() => {
     let timer: NodeJS.Timeout;
@@ -167,8 +167,6 @@ export default function NewPayment() {
     setSubmitError(null);
     try {
       if (subscription) {
-        if (!subscription.userSummary?.totalUnpaid) return;
-        
         if (selectedCycles.length === 0) {
           setSubmitError('Please select at least one cycle to pay.');
           setIsSubmitting(false);

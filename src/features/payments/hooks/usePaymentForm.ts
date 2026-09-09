@@ -16,9 +16,10 @@ export function usePaymentForm() {
 
   const currentUserId = currentUser?.id || '';
 
-  // Only include expenses where current user owes money (participant, not creator, and NOT fully paid or pending)
+  // Only include expenses where current user owes money (participant, not creator, confirmed, and NOT fully paid or pending)
   const userExpenses = expenses.filter((exp: any) => {
     if (exp.creatorId === currentUserId) return false;
+    if (exp.status !== 'Confirmed') return false;
     if (!exp.participants || !Array.isArray(exp.participants)) return false;
     const isPart = exp.participants.some((p: any) =>
       typeof p === 'string' ? p === currentUserId : p.userId === currentUserId

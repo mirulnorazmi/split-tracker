@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { api, User, LoginResponse, RegisterResponse, setToken, clearToken, ApiError } from '@/lib/api';
+import { clearMemoryCache } from '@/lib/hooks/useData';
 
 interface AuthContextValue {
   user: User | null;
@@ -44,6 +45,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const login = useCallback(async (email: string, password: string): Promise<LoginResponse> => {
     const res = await api.login({ email, password });
+    clearMemoryCache();
     setToken(res.token);
     setUser(res.user);
     return res;
@@ -52,6 +54,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const register = useCallback(async (name: string, email: string, password: string): Promise<RegisterResponse> => {
     const res = await api.register({ name, email, password });
     if (res.token && res.user) {
+      clearMemoryCache();
       setToken(res.token);
       setUser(res.user);
     }
@@ -64,6 +67,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     } catch {
       // ignore
     } finally {
+      clearMemoryCache();
       clearToken();
       setUser(null);
     }

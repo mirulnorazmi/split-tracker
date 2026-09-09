@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useParams } from 'react-router-dom';
-import { Check, Clock, Eye, Download, ExternalLink, Image as ImageIcon } from 'lucide-react';
+import { Check, X, Clock, Eye, Download, ExternalLink, Image as ImageIcon } from 'lucide-react';
 import { useAuth } from '@/app/AuthContext';
 import { usePayments, useExpenses, useUsers } from '@/lib/hooks/useData';
 import { api, getReceiptUrl } from '@/lib/api';
@@ -48,6 +48,19 @@ export default function PaymentDetails({ paymentId: propPaymentId, onBack }: Pay
     }
   };
 
+  const handleRejectPayment = async () => {
+    if (!payment) return;
+    setActionLoading(true);
+    try {
+      await api.updatePaymentStatus(payment.id, 'Rejected');
+      await refetch();
+    } catch (err) {
+      console.error('Failed to reject payment:', err);
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
   if (isLoading) {
     return (
       <div className="max-w-3xl mx-auto text-center py-20 text-zinc-500">
@@ -74,6 +87,7 @@ export default function PaymentDetails({ paymentId: propPaymentId, onBack }: Pay
     : [];
   const paymentExpenses = expenses.filter((e) => appliedExpenseIds.includes(e.id));
   const isConfirmed = payment.status === 'Confirmed';
+  const isRejected = payment.status === 'Rejected';
 
   return (
     <div className="max-w-3xl mx-auto space-y-6 sm:space-y-8 animate-in fade-in duration-500 pb-20">
@@ -81,9 +95,14 @@ export default function PaymentDetails({ paymentId: propPaymentId, onBack }: Pay
 
       <header className="mb-6 sm:mb-8 lg:mb-10">
         <div className="flex items-center gap-3 mb-3">
-          <div className={`px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider flex items-center gap-1.5 ${isConfirmed ? 'bg-emerald-500/10 text-emerald-500' : 'bg-amber-500/10 text-amber-500'
-            }`}>
-            {isConfirmed ? <Check className="w-3.5 h-3.5" /> : <Clock className="w-3.5 h-3.5" />}
+          <div className={`px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider flex items-center gap-1.5 ${
+            isConfirmed
+              ? 'bg-emerald-500/10 text-emerald-500 border border-emerald-500/20'
+              : isRejected
+              ? 'bg-red-500/10 text-red-400 border border-red-500/20'
+              : 'bg-amber-500/10 text-amber-500 border border-amber-500/20'
+          }`}>
+            {isConfirmed ? <Check className="w-3.5 h-3.5" /> : isRejected ? <X className="w-3.5 h-3.5" /> : <Clock className="w-3.5 h-3.5" />}
             {payment.status}
           </div>
         </div>
@@ -251,16 +270,43 @@ export default function PaymentDetails({ paymentId: propPaymentId, onBack }: Pay
               <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
               <h3 className="text-white font-medium text-lg">Pending Confirmation</h3>
             </div>
-            <p className="text-zinc-400 text-sm">This payment needs confirmation before it is officially recorded.</p>
+            <p className="text-zinc-400 text-sm">
+              {currentUser?.id === payment.payeeId
+                ? 'This payment needs your confirmation as the expense host before it is officially recorded.'
+                : `Waiting for the expense host (${payeeName}) to confirm this payment.`}
+            </p>
           </div>
-          <div className="flex w-full sm:w-auto gap-3">
-            <button
-              disabled={actionLoading}
-              onClick={handleConfirmPayment}
-              className="flex-1 sm:flex-none px-5 sm:px-6 py-2.5 sm:py-3 rounded-xl bg-accent text-accent-text font-bold hover:opacity-90 transition-opacity flex items-center justify-center gap-2 text-sm disabled:opacity-50 shadow-lg shadow-accent/10 cursor-pointer"
-            >
-              <Check className="w-4 sm:w-5 h-4 sm:h-5" /> {actionLoading ? 'Confirming...' : 'Confirm Payment'}
-            </button>
+          {currentUser?.id === payment.payeeId && (
+            <div className="flex w-full sm:w-auto gap-3">
+              <button
+                disabled={actionLoading}
+                onClick={handleRejectPayment}
+                className="flex-1 sm:flex-none px-5 sm:px-6 py-2.5 sm:py-3 rounded-xl bg-red-500/10 text-red-400 border border-red-500/20 font-bold hover:bg-red-500/20 transition-colors flex items-center justify-center gap-2 text-sm disabled:opacity-50 cursor-pointer"
+              >
+                <X className="w-4 sm:w-5 h-4 sm:h-5" /> {actionLoading ? 'Rejecting...' : 'Reject Payment'}
+              </button>
+              <button
+                disabled={actionLoading}
+                onClick={handleConfirmPayment}
+                className="flex-1 sm:flex-none px-5 sm:px-6 py-2.5 sm:py-3 rounded-xl bg-accent text-accent-text font-bold hover:opacity-90 transition-opacity flex items-center justify-center gap-2 text-sm disabled:opacity-50 shadow-lg shadow-accent/10 cursor-pointer"
+              >
+                <Check className="w-4 sm:w-5 h-4 sm:h-5" /> {actionLoading ? 'Confirming...' : 'Confirm Payment'}
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
+      {payment.status === 'Rejected' && (
+        <div className="bg-red-950/30 border border-red-800/50 rounded-3xl p-5 sm:p-6 flex items-center gap-4">
+          <div className="w-10 h-10 rounded-full bg-red-500/10 border border-red-500/20 flex items-center justify-center shrink-0">
+            <X className="w-5 h-5 text-red-400" />
+          </div>
+          <div>
+            <h3 className="text-red-300 font-medium text-base">Payment Rejected</h3>
+            <p className="text-zinc-400 text-sm mt-0.5">
+              This payment submission was rejected by the expense host{payment.confirmedByName ? ` (${payment.confirmedByName})` : ''}. The amount was not deducted from outstanding balances.
+            </p>
           </div>
         </div>
       )}

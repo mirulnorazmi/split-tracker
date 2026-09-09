@@ -21,6 +21,7 @@ import {
   X,
   Loader2,
   ChevronDown,
+  Calendar,
 } from 'lucide-react';
 import {
   PieChart,
@@ -934,7 +935,10 @@ export default function FolderDetails() {
                         </span>
                       </div>
                       <div className="text-xs text-zinc-500 flex flex-wrap items-center gap-1.5">
-                        <span>{formatDate(expense.date)}</span>
+                        <span className="flex items-center gap-1">
+                          <Calendar className="w-3 h-3 text-zinc-400" />
+                          <span>Event: <strong className="text-zinc-300 font-normal">{formatDate(expense.date)}</strong></span>
+                        </span>
                         <span>•</span>
                         <span>{expense.categoryName || 'General'}</span>
                         <span>•</span>

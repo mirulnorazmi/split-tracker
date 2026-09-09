@@ -6,6 +6,7 @@ interface CreateExpenseBody {
   totalAmount: number;
   categoryId: string;
   folderId?: string | null;
+  date?: string;
   participants: { userId: string; amountOwed: number }[];
 }
 
@@ -20,7 +21,7 @@ export default async function expenseRoutes(fastify: FastifyInstance) {
    */
   fastify.post('/expenses', { preHandler: [fastify.authenticate] }, async (request: FastifyRequest, reply: FastifyReply) => {
     const { role, id: creatorId } = request.user as { role: string; id: string };
-    const { title, totalAmount, categoryId, folderId, participants } = request.body as CreateExpenseBody;
+    const { title, totalAmount, categoryId, folderId, date, participants } = request.body as CreateExpenseBody;
 
     if (!title || !totalAmount || !categoryId || !participants || participants.length === 0) {
       return reply.status(400).send({ error: 'Bad Request', message: 'title, totalAmount, categoryId, and participants are required' });
@@ -32,7 +33,7 @@ export default async function expenseRoutes(fastify: FastifyInstance) {
       return reply.status(400).send({ error: 'Bad Request', message: 'Sum of participant amounts must equal totalAmount' });
     }
 
-    // Admin-created expenses are auto-confirmed
+    // Admin-created expenses are auto-confirmed; Member-created expenses require Admin approval
     const status = role === 'Admin' ? 'Confirmed' : 'Pending';
 
     // Rule: If assigning to a folder, only the folder owner can add expenses to it
@@ -50,10 +51,10 @@ export default async function expenseRoutes(fastify: FastifyInstance) {
     try {
       await client.query('BEGIN');
       const { rows: [expense] } = await client.query(
-        `INSERT INTO expense (title, total_amount, category_id, creator_id, status, folder_id)
-         VALUES ($1, $2, $3, $4, $5, $6)
-         RETURNING id, title, total_amount, date, category_id, creator_id, status, folder_id AS "folderId", created_at`,
-        [title, totalAmount, categoryId, creatorId, status, folderId || null]
+        `INSERT INTO expense (title, total_amount, category_id, creator_id, status, folder_id, date)
+         VALUES ($1, $2, $3, $4, $5, $6, COALESCE($7::timestamptz, NOW()))
+         RETURNING id, title, total_amount, date, category_id, creator_id, status, folder_id AS "folderId", created_at AS "createdAt"`,
+        [title, totalAmount, categoryId, creatorId, status, folderId || null, date ? new Date(date).toISOString() : null]
       );
 
       for (const p of participants) {
@@ -95,16 +96,22 @@ export default async function expenseRoutes(fastify: FastifyInstance) {
     const params: any[] = [];
     const conditions: string[] = [];
 
-    // Non-admins can only see Confirmed expenses, OR Pending expenses they personally created.
-    // They cannot see pending expenses created by other users until approved by Admin.
+    // Non-admins can only see Confirmed expenses, OR expenses they personally created (host).
+    // They cannot see pending or rejected expenses created by other users.
     if (role !== 'Admin') {
       params.push(userId);
       conditions.push(`(e.status = 'Confirmed' OR e.creator_id = $${params.length})`);
     }
 
     if (status) {
-      params.push(status);
-      conditions.push(`e.status = $${params.length}`);
+      if (status.includes(',')) {
+        const statuses = status.split(',').map((s) => s.trim());
+        params.push(statuses);
+        conditions.push(`e.status = ANY($${params.length})`);
+      } else {
+        params.push(status);
+        conditions.push(`e.status = $${params.length}`);
+      }
     }
     if (creatorId) {
       params.push(creatorId);
@@ -119,6 +126,7 @@ export default async function expenseRoutes(fastify: FastifyInstance) {
 
     const { rows } = await query(
       `SELECT e.id, e.title, e.total_amount AS "totalAmount", e.date, e.status,
+              e.created_at AS "createdAt", e.updated_at AS "updatedAt",
               e.category_id AS "categoryId", e.creator_id AS "creatorId",
               e.folder_id AS "folderId", f.name AS "folderName", f.color AS "folderColor",
               e.approved_by AS "approvedById", approver.name AS "approvedByName", e.approved_at AS "approvedAt",
@@ -131,7 +139,7 @@ export default async function expenseRoutes(fastify: FastifyInstance) {
        LEFT JOIN expense_participant ep ON ep.expense_id = e.id
        ${where}
        GROUP BY e.id, c.id, approver.id, f.id
-       ORDER BY e.date DESC`,
+       ORDER BY e.date DESC, e.created_at DESC`,
       params
     );
 
@@ -148,6 +156,7 @@ export default async function expenseRoutes(fastify: FastifyInstance) {
 
     const { rows } = await query(
       `SELECT e.id, e.title, e.total_amount AS "totalAmount", e.date, e.status,
+              e.created_at AS "createdAt", e.updated_at AS "updatedAt",
               e.category_id AS "categoryId", e.creator_id AS "creatorId",
               e.folder_id AS "folderId", f.name AS "folderName", f.color AS "folderColor",
               e.approved_by AS "approvedById", approver.name AS "approvedByName", e.approved_at AS "approvedAt",
@@ -169,9 +178,9 @@ export default async function expenseRoutes(fastify: FastifyInstance) {
 
     const expense = rows[0];
 
-    // Non-admins cannot view pending expenses created by someone else
-    if (role !== 'Admin' && expense.status === 'Pending' && expense.creatorId !== userId) {
-      return reply.status(403).send({ error: 'Forbidden', message: 'This expense is pending administrator approval.' });
+    // Non-admins cannot view pending or rejected expenses created by someone else
+    if (role !== 'Admin' && ['Pending', 'Rejected'].includes(expense.status) && expense.creatorId !== userId) {
+      return reply.status(403).send({ error: 'Forbidden', message: 'This expense is pending administrator approval or has been rejected.' });
     }
 
     return reply.send(expense);
@@ -179,22 +188,30 @@ export default async function expenseRoutes(fastify: FastifyInstance) {
 
   /**
    * PUT /expenses/:id
-   * Authenticated — update an expense's details
-   * Permitted for Admins or expense creator
+   * Authenticated — update an expense (Admin or creator)
    */
   fastify.put('/expenses/:id', { preHandler: [fastify.authenticate] }, async (request: FastifyRequest, reply: FastifyReply) => {
     const { role, id: userId } = request.user as { role: string; id: string };
     const { id } = request.params as { id: string };
-    const { title, totalAmount, categoryId, folderId, participants } = request.body as Partial<CreateExpenseBody>;
+    const { title, totalAmount, categoryId, folderId, date, participants } = request.body as Partial<CreateExpenseBody>;
 
     const { rows: existingRows } = await query('SELECT * FROM expense WHERE id = $1', [id]);
     if (existingRows.length === 0) {
       return reply.status(404).send({ error: 'Not Found', message: 'Expense not found' });
     }
 
-    const existing = existingRows[0];
-    if (role !== 'Admin' && existing.creator_id !== userId) {
-      return reply.status(403).send({ error: 'Forbidden', message: 'Only the creator or an admin can edit this expense' });
+    // Only admin or creator can edit
+    if (role !== 'Admin' && existingRows[0].creator_id !== userId) {
+      return reply.status(403).send({ error: 'Forbidden', message: 'Only the creator or an administrator can edit this expense' });
+    }
+
+    // Validate participants if provided
+    if (participants && participants.length > 0) {
+      const sum = participants.reduce((acc, p) => acc + p.amountOwed, 0);
+      const expectedTotal = totalAmount ?? Number(existingRows[0].total_amount);
+      if (Math.abs(sum - expectedTotal) > 0.01) {
+        return reply.status(400).send({ error: 'Bad Request', message: 'Sum of participant amounts must equal totalAmount' });
+      }
     }
 
     // Rule: If assigning to a folder, only the folder owner can add expenses to it
@@ -218,15 +235,17 @@ export default async function expenseRoutes(fastify: FastifyInstance) {
              total_amount = COALESCE($2, total_amount),
              category_id = COALESCE($3, category_id),
              folder_id = CASE WHEN $4::boolean THEN $5::uuid ELSE folder_id END,
+             date = CASE WHEN $6::timestamptz IS NOT NULL THEN $6::timestamptz ELSE date END,
              updated_at = NOW()
-         WHERE id = $6
-         RETURNING id, title, total_amount, category_id, folder_id AS "folderId", status`,
+         WHERE id = $7
+         RETURNING id, title, total_amount, date, category_id, folder_id AS "folderId", status, created_at AS "createdAt", updated_at AS "updatedAt"`,
         [
           title ?? null,
           totalAmount ?? null,
           categoryId ?? null,
           folderId !== undefined,
           folderId || null,
+          date ? new Date(date).toISOString() : null,
           id,
         ]
       );
@@ -253,8 +272,8 @@ export default async function expenseRoutes(fastify: FastifyInstance) {
 
   /**
    * PATCH | POST | GET /expenses/:id/status & /expenses/:id/approve
-   * Authenticated — approve or confirm a pending expense
-   * Permitted for Admins, expense creators, or expense participants
+   * Authenticated — approve or reject a pending expense
+   * Permitted for Admins
    */
   const handleUpdateExpenseStatus = async (request: FastifyRequest, reply: FastifyReply) => {
     const { role, id: userId } = request.user as { role: string; id: string };
@@ -263,19 +282,19 @@ export default async function expenseRoutes(fastify: FastifyInstance) {
     const queryParams = (request.query as { status?: string }) || {};
     const status = body.status || queryParams.status || 'Confirmed';
 
-    if (!status || !['Confirmed'].includes(status)) {
-      return reply.status(400).send({ error: 'Bad Request', message: 'status must be "Confirmed"' });
+    if (!status || !['Confirmed', 'Rejected'].includes(status)) {
+      return reply.status(400).send({ error: 'Bad Request', message: 'status must be "Confirmed" or "Rejected"' });
     }
 
-    // Only Admin can approve expenses
+    // Only Admin can approve or reject expenses
     if (role !== 'Admin') {
-      return reply.status(403).send({ error: 'Forbidden', message: 'Only administrators can approve expenses' });
+      return reply.status(403).send({ error: 'Forbidden', message: 'Only administrators can approve or reject expenses' });
     }
 
     const { rows } = await query(
       `UPDATE expense
        SET status = $1, approved_by = $2, approved_at = NOW(), updated_at = NOW()
-       WHERE id = $3 AND status = 'Pending'
+       WHERE id = $3 AND (status = 'Pending' OR status = 'Rejected')
        RETURNING id, status, approved_by AS "approvedById", approved_at AS "approvedAt"`,
       [status, userId, id]
     );
@@ -289,7 +308,7 @@ export default async function expenseRoutes(fastify: FastifyInstance) {
         [id]
       );
       if (existing.length > 0) {
-        return reply.send({ ...existing[0], message: 'Expense is already confirmed.' });
+        return reply.send({ ...existing[0], message: `Expense is already ${existing[0].status.toLowerCase()}.` });
       }
       return reply.status(404).send({ error: 'Not Found', message: 'Expense not found' });
     }
@@ -297,7 +316,7 @@ export default async function expenseRoutes(fastify: FastifyInstance) {
     const { rows: approverRows } = await query('SELECT name FROM "user" WHERE id = $1', [userId]);
     const approvedByName = approverRows[0]?.name || null;
 
-    return reply.send({ ...rows[0], approvedByName, message: 'Expense status updated.' });
+    return reply.send({ ...rows[0], approvedByName, message: `Expense ${status.toLowerCase()} successfully.` });
   };
 
   fastify.patch('/expenses/:id/status', { preHandler: [fastify.authenticate] }, handleUpdateExpenseStatus);
@@ -308,24 +327,25 @@ export default async function expenseRoutes(fastify: FastifyInstance) {
 
   /**
    * DELETE /expenses/:id
-   * Delete an expense (Admin only)
+   * Delete an expense (Creator or Admin)
    */
   fastify.delete('/expenses/:id', { preHandler: [fastify.authenticate] }, async (request: FastifyRequest, reply: FastifyReply) => {
-    const { role } = request.user as { role: string; id: string };
-    if (role !== 'Admin') {
-      return reply.status(403).send({ error: 'Forbidden', message: 'Only administrators can delete expenses' });
+    const { role, id: userId } = request.user as { role: string; id: string };
+    const { id } = request.params as { id: string };
+
+    const { rows: existingRows } = await query('SELECT creator_id FROM expense WHERE id = $1', [id]);
+    if (existingRows.length === 0) {
+      return reply.status(404).send({ error: 'Not Found', message: 'Expense not found' });
     }
 
-    const { id } = request.params as { id: string };
+    if (role !== 'Admin' && existingRows[0].creator_id !== userId) {
+      return reply.status(403).send({ error: 'Forbidden', message: 'Only the creator or an administrator can delete this expense' });
+    }
 
     const { rows } = await query(
       'DELETE FROM expense WHERE id = $1 RETURNING id, title',
       [id]
     );
-
-    if (rows.length === 0) {
-      return reply.status(404).send({ error: 'Not Found', message: 'Expense not found' });
-    }
 
     return reply.send({ message: 'Expense deleted successfully', id, title: rows[0].title });
   });

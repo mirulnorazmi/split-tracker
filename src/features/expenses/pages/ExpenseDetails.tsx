@@ -91,6 +91,7 @@ export default function ExpenseDetails({ expenseId: propExpenseId, onBack }: Exp
         initialTitle: expense.title,
         initialAmount: Number(expense.totalAmount).toFixed(2),
         initialCategoryId: expense.categoryId,
+        initialDate: expense.date,
         initialParticipants: pIds,
         initialCustomAmounts: cAmounts,
         lockedParticipantId: expense.creatorId,
@@ -117,6 +118,7 @@ export default function ExpenseDetails({ expenseId: propExpenseId, onBack }: Exp
         totalAmount: form.numAmount,
         categoryId: form.selectedCategory,
         folderId: selectedFolderId || null,
+        date: form.date ? new Date(form.date).toISOString() : undefined,
         participants,
       });
 
@@ -150,6 +152,20 @@ export default function ExpenseDetails({ expenseId: propExpenseId, onBack }: Exp
       await refetch();
     } catch (err) {
       console.error('Failed to approve expense:', err);
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleReject = async () => {
+    if (!expense) return;
+    setActionLoading(true);
+    try {
+      await api.updateExpenseStatus(expense.id, 'Rejected');
+      await refetch();
+    } catch (err: any) {
+      console.error('Failed to reject expense:', err);
+      alert(err?.message || 'Failed to reject expense');
     } finally {
       setActionLoading(false);
     }
@@ -265,7 +281,10 @@ export default function ExpenseDetails({ expenseId: propExpenseId, onBack }: Exp
               <div>
                 <h3 className="text-sm font-semibold text-zinc-500 uppercase tracking-wider mb-1">Updated Details</h3>
                 <div className="text-2xl font-medium text-white">{form.title}</div>
-                <div className="text-sm text-zinc-400 mt-1">{formatDate(expense.date)}</div>
+                <div className="text-sm text-zinc-400 mt-1 flex items-center gap-1.5">
+                  <Calendar className="w-3.5 h-3.5 text-zinc-500" />
+                  <span>Date of Event: <strong className="text-zinc-200 font-medium">{formatDate(form.date)}</strong></span>
+                </div>
               </div>
               {selectedCategoryData && (
                 <div className={cn('px-3 py-1.5 rounded-full flex items-center gap-2 text-sm font-medium border', selectedCategoryData.color, 'bg-zinc-900/50')}>
@@ -381,20 +400,33 @@ export default function ExpenseDetails({ expenseId: propExpenseId, onBack }: Exp
             </div>
             <div>
               <label className="block text-sm font-medium text-zinc-300 mb-2 flex items-center gap-1.5">
-                <FolderIcon className="w-3.5 h-3.5 text-accent" />
-                Folder / Group (Optional)
+                <Calendar className="w-3.5 h-3.5 text-zinc-400" />
+                Date of Event
               </label>
-              <select
-                value={selectedFolderId}
-                onChange={(e) => setSelectedFolderId(e.target.value)}
-                className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-zinc-600 transition-colors text-sm appearance-none cursor-pointer"
-              >
-                <option value="">None (Standalone Expense)</option>
-                {folders.map((f) => (
-                  <option key={f.id} value={f.id}>{f.name} ({f.category || 'General'})</option>
-                ))}
-              </select>
+              <input
+                type="date"
+                value={form.date}
+                onChange={(e) => form.setDate(e.target.value)}
+                className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-zinc-600 transition-colors text-sm [color-scheme:dark] cursor-pointer"
+              />
             </div>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-zinc-300 mb-2 flex items-center gap-1.5">
+              <FolderIcon className="w-3.5 h-3.5 text-accent" />
+              Folder / Group (Optional)
+            </label>
+            <select
+              value={selectedFolderId}
+              onChange={(e) => setSelectedFolderId(e.target.value)}
+              className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-zinc-600 transition-colors text-sm appearance-none cursor-pointer"
+            >
+              <option value="">None (Standalone Expense)</option>
+              {folders.map((f) => (
+                <option key={f.id} value={f.id}>{f.name} ({f.category || 'General'})</option>
+              ))}
+            </select>
           </div>
 
           <ParticipantPicker
@@ -446,7 +478,7 @@ export default function ExpenseDetails({ expenseId: propExpenseId, onBack }: Exp
               <Edit2 className="w-4 h-4" /> Edit details
             </button>
           )}
-          {isAdmin && (
+          {(isAdmin || isHost) && (
             <button
               onClick={handleDeleteExpense}
               disabled={actionLoading}
@@ -467,6 +499,10 @@ export default function ExpenseDetails({ expenseId: propExpenseId, onBack }: Exp
             <span className="px-2.5 py-0.5 rounded-full text-[10px] sm:text-xs font-semibold bg-amber-500/10 text-amber-500 border border-amber-500/20">
               PENDING
             </span>
+          ) : expense.status === 'Rejected' ? (
+            <span className="px-2.5 py-0.5 rounded-full text-[10px] sm:text-xs font-semibold bg-red-500/10 text-red-400 border border-red-500/20 flex items-center gap-1">
+              <X className="w-3 h-3" /> REJECTED
+            </span>
           ) : (
             <span className="px-2.5 py-0.5 rounded-full text-[10px] sm:text-xs font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 flex items-center gap-1">
               <Check className="w-3 h-3" /> CONFIRMED
@@ -484,12 +520,23 @@ export default function ExpenseDetails({ expenseId: propExpenseId, onBack }: Exp
         </div>
         <h1 className="text-2xl sm:text-3xl lg:text-4xl font-light text-white tracking-tight">{expense.title}</h1>
         <p className="text-zinc-400 mt-2 text-sm sm:text-base flex flex-wrap items-center gap-1.5">
-          <span>{formatDate(expense.date)}</span>
+          <span className="flex items-center gap-1.5 text-zinc-300">
+            <Calendar className="w-4 h-4 text-zinc-400" />
+            Date of event: <strong className="text-white font-medium">{formatDate(expense.date)}</strong>
+          </span>
+          {expense.createdAt && (
+            <>
+              <span className="text-zinc-600">•</span>
+              <span className="text-zinc-500 text-xs sm:text-sm">
+                Recorded on {formatDate(expense.createdAt)}
+              </span>
+            </>
+          )}
           {expense.approvedByName && (
             <>
               <span className="text-zinc-600">•</span>
-              <span>
-                Approved by <span className="text-zinc-200 font-medium">{expense.approvedByName}</span>
+              <span className="text-zinc-400">
+                {expense.status === 'Rejected' ? 'Rejected' : 'Approved'} by <span className="text-zinc-200 font-medium">{expense.approvedByName}</span>
                 {expense.approvedAt ? ` on ${formatDate(expense.approvedAt)}` : ''}
               </span>
             </>
@@ -500,7 +547,7 @@ export default function ExpenseDetails({ expenseId: propExpenseId, onBack }: Exp
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4">
         {[
           { label: 'Category', value: category?.name || 'Unknown' },
-          { label: 'Date', value: formatDate(expense.date) },
+          { label: 'Date of Event', value: formatDate(expense.date) },
           { label: 'Participants', value: String(participantIds.length) },
           { label: 'Total Amount', value: `RM ${Number(expense.totalAmount).toFixed(2)}` },
         ].map(({ label, value }) => (
@@ -680,14 +727,16 @@ export default function ExpenseDetails({ expenseId: propExpenseId, onBack }: Exp
             </p>
           </div>
 
-          {/* Quick settlement action if user owes */}
-          <button
-            onClick={() => navigate('/payments/new')}
-            className="px-4 py-2 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 rounded-xl text-xs sm:text-sm font-medium text-white transition-colors flex items-center gap-2 self-start sm:self-auto cursor-pointer"
-          >
-            <CreditCard className="w-4 h-4 text-accent" />
-            Make Payment
-          </button>
+          {/* Quick settlement action if user owes and expense is confirmed */}
+          {expense.status === 'Confirmed' && !isHost && participantIds.includes(currentUserId) && (
+            <button
+              onClick={() => navigate('/payments/new')}
+              className="px-4 py-2 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 rounded-xl text-xs sm:text-sm font-medium text-white transition-colors flex items-center gap-2 self-start sm:self-auto cursor-pointer"
+            >
+              <CreditCard className="w-4 h-4 text-accent" />
+              Make Payment
+            </button>
+          )}
         </div>
 
         {/* Filter Controls Bar */}
@@ -832,11 +881,32 @@ export default function ExpenseDetails({ expenseId: propExpenseId, onBack }: Exp
           <div className="flex w-full sm:w-auto gap-3">
             <button
               disabled={actionLoading}
+              onClick={handleReject}
+              className="flex-1 sm:flex-none px-5 sm:px-6 py-2.5 sm:py-3 rounded-xl bg-red-500/10 text-red-400 border border-red-500/20 font-bold hover:bg-red-500/20 transition-colors flex items-center justify-center gap-2 text-sm disabled:opacity-50 cursor-pointer"
+            >
+              <X className="w-4 sm:w-5 h-4 sm:h-5" /> {actionLoading ? 'Rejecting...' : 'Reject Expense'}
+            </button>
+            <button
+              disabled={actionLoading}
               onClick={handleApprove}
               className="flex-1 sm:flex-none px-5 sm:px-6 py-2.5 sm:py-3 rounded-xl bg-accent text-accent-text font-bold hover:opacity-90 transition-opacity flex items-center justify-center gap-2 text-sm disabled:opacity-50 shadow-lg shadow-accent/10 cursor-pointer"
             >
               <Check className="w-4 sm:w-5 h-4 sm:h-5" /> {actionLoading ? 'Approving...' : 'Approve Expense'}
             </button>
+          </div>
+        </div>
+      )}
+
+      {expense.status === 'Rejected' && (
+        <div className="bg-red-950/30 border border-red-800/50 rounded-3xl p-5 sm:p-6 flex items-center gap-4">
+          <div className="w-10 h-10 rounded-full bg-red-500/10 border border-red-500/20 flex items-center justify-center shrink-0">
+            <X className="w-5 h-5 text-red-400" />
+          </div>
+          <div>
+            <h3 className="text-red-300 font-medium text-base">Expense Rejected</h3>
+            <p className="text-zinc-400 text-sm mt-0.5">
+              This expense was rejected by {expense.approvedByName ? expense.approvedByName : 'an administrator'}. It is not included in shared balances.
+            </p>
           </div>
         </div>
       )}

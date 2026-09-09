@@ -123,6 +123,13 @@ export default function SubscriptionDetails() {
 
   useEffect(() => {
     fetchDetails();
+    const handleRefresh = () => { fetchDetails(); };
+    window.addEventListener('splittrack:data-changed', handleRefresh);
+    window.addEventListener('focus', handleRefresh);
+    return () => {
+      window.removeEventListener('splittrack:data-changed', handleRefresh);
+      window.removeEventListener('focus', handleRefresh);
+    };
   }, [id, selectedYear]);
 
   const activeParticipants = subscription?.participants?.filter((p) => p.isActive) || [];

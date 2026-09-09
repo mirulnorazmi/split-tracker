@@ -172,6 +172,7 @@ export const api = {
     totalAmount: number;
     categoryId: string;
     folderId?: string | null;
+    date?: string;
     participants: { userId: string; amountOwed: number }[];
   }) => request<Expense>('POST', '/expenses', data),
 
@@ -193,6 +194,7 @@ export const api = {
       totalAmount?: number;
       categoryId?: string;
       folderId?: string | null;
+      date?: string;
       participants?: { userId: string; amountOwed: number }[];
     }
   ) => request<Expense>('PUT', `/expenses/${id}`, data),
@@ -323,6 +325,8 @@ export interface Expense {
   title: string;
   totalAmount: number;
   date: string;
+  createdAt?: string;
+  updatedAt?: string;
   status: string;
   categoryId: string;
   creatorId: string;

@@ -9,17 +9,22 @@ export default function Payments() {
   const navigate = useNavigate();
   const { user: currentUser } = useAuth();
   const { stats } = useDashboardData();
-  const { payments, isLoading } = usePayments({ payerId: currentUser?.id });
+  const [activeTab, setActiveTab] = useState<'sent' | 'received'>('sent');
+  const { payments: sentPayments, isLoading: sentLoading } = usePayments({ payerId: currentUser?.id });
+  const { payments: receivedPayments, isLoading: receivedLoading } = usePayments({ payeeId: currentUser?.id });
   const { expenses } = useExpenses();
   const { users } = useUsers();
 
   const [page, setPage] = useState(1);
   const ITEMS_PER_PAGE = 10;
 
-  const totalPages = Math.ceil(payments.length / ITEMS_PER_PAGE);
-  const paginatedPayments = payments.slice((page - 1) * ITEMS_PER_PAGE, page * ITEMS_PER_PAGE);
+  const currentPayments = activeTab === 'sent' ? sentPayments : receivedPayments;
+  const isLoading = activeTab === 'sent' ? sentLoading : receivedLoading;
+  const pendingReceivedCount = receivedPayments.filter((p) => p.status === 'Pending').length;
 
-  const totalOwed = stats?.totalOwed ?? 0;
+  const totalPages = Math.ceil(currentPayments.length / ITEMS_PER_PAGE);
+  const paginatedPayments = currentPayments.slice((page - 1) * ITEMS_PER_PAGE, page * ITEMS_PER_PAGE);
+
   const confirmedPayments = stats?.confirmedPayments ?? 0;
   const pendingPayments = stats?.pendingPayments ?? 0;
   const currentBalance = stats?.currentBalance ?? 0;
@@ -51,7 +56,7 @@ export default function Payments() {
         </Link>
       </header>
 
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4">
         <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-4 sm:p-5 flex flex-col justify-between">
           <div className="flex justify-between items-start mb-3 sm:mb-4">
             <span className="text-[10px] sm:text-xs font-semibold text-zinc-500 uppercase tracking-wider">Current Balance</span>
@@ -60,13 +65,6 @@ export default function Payments() {
           <div>
             <div className="text-2xl sm:text-3xl lg:text-4xl font-light text-white mb-1">{formatCurrency(currentBalance)}</div>
             <div className="text-[10px] sm:text-xs text-zinc-500">Still owed</div>
-          </div>
-        </div>
-        <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-4 sm:p-5 flex flex-col justify-between">
-          <div className="mb-3 sm:mb-4"><span className="text-[10px] sm:text-xs font-semibold text-zinc-500 uppercase tracking-wider">Total Shared</span></div>
-          <div>
-            <div className="text-2xl sm:text-3xl lg:text-4xl font-light text-white mb-1">{formatCurrency(totalOwed)}</div>
-            <div className="text-[10px] sm:text-xs text-zinc-500">From shared expenses</div>
           </div>
         </div>
         <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-4 sm:p-5 flex flex-col justify-between">
@@ -86,23 +84,58 @@ export default function Payments() {
       </div>
 
       <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-4 sm:p-6">
-        <div className="flex items-center justify-between mb-4 sm:mb-6">
-          <div className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">History</div>
-          <div className="text-xs text-zinc-500">{payments.length} records</div>
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-4 sm:mb-6">
+          <div className="flex items-center gap-2 bg-zinc-950 p-1 rounded-xl border border-zinc-800 w-fit">
+            <button
+              onClick={() => { setActiveTab('sent'); setPage(1); }}
+              className={`px-3 sm:px-4 py-1.5 rounded-lg text-xs sm:text-sm font-medium transition-all cursor-pointer ${
+                activeTab === 'sent'
+                  ? 'bg-zinc-800 text-white shadow-sm'
+                  : 'text-zinc-400 hover:text-zinc-200'
+              }`}
+            >
+              Sent ({sentPayments.length})
+            </button>
+            <button
+              onClick={() => { setActiveTab('received'); setPage(1); }}
+              className={`px-3 sm:px-4 py-1.5 rounded-lg text-xs sm:text-sm font-medium transition-all cursor-pointer flex items-center gap-2 ${
+                activeTab === 'received'
+                  ? 'bg-zinc-800 text-white shadow-sm'
+                  : 'text-zinc-400 hover:text-zinc-200'
+              }`}
+            >
+              <span>Received ({receivedPayments.length})</span>
+              {pendingReceivedCount > 0 && (
+                <span className="px-1.5 py-0.5 text-[10px] font-bold bg-amber-500/20 text-amber-400 border border-amber-500/30 rounded-full">
+                  {pendingReceivedCount} pending
+                </span>
+              )}
+            </button>
+          </div>
+          <div className="text-xs text-zinc-500">{currentPayments.length} records</div>
         </div>
 
         <div className="space-y-3">
           {isLoading ? (
             <div className="py-12 text-center text-zinc-500">Loading payments...</div>
-          ) : payments.length === 0 ? (
+          ) : currentPayments.length === 0 ? (
             <div className="py-12 flex flex-col items-center justify-center text-center">
-              <div className="text-zinc-400 font-medium mb-1">No payments yet.</div>
-              <div className="text-sm text-zinc-600">Your submitted payments will appear here.</div>
+              <div className="text-zinc-400 font-medium mb-1">
+                {activeTab === 'sent' ? 'No sent payments yet.' : 'No received payments yet.'}
+              </div>
+              <div className="text-sm text-zinc-600">
+                {activeTab === 'sent'
+                  ? 'Your submitted payments will appear here.'
+                  : 'Payments submitted to you by expense participants will appear here for confirmation.'}
+              </div>
             </div>
           ) : (
             paginatedPayments.map((payment) => {
               const payee = users.find((u) => u.id === payment.payeeId);
               const payeeName = payment.payeeName || payee?.name || 'Unknown';
+              const payer = users.find((u) => u.id === payment.payerId);
+              const payerName = payment.payerName || payer?.name || 'Unknown';
+
               const appliedExpenseIds = payment.expensesApplied
                 ? payment.expensesApplied.map((ea: any) => ea.expenseId)
                 : [];
@@ -134,22 +167,37 @@ export default function Payments() {
                     <div className="font-medium text-zinc-200 mb-1 flex flex-wrap items-center gap-2 text-sm sm:text-base">
                       <span>{sessionName}</span>
                       <span className="text-[9px] sm:text-[10px] uppercase font-bold tracking-wider text-zinc-500 bg-zinc-800 px-1.5 sm:px-2 py-0.5 rounded-full">
-                        To {payeeName}
+                        {activeTab === 'sent' ? `To ${payeeName}` : `From ${payerName}`}
                       </span>
+                      {activeTab === 'received' && payment.status === 'Pending' && (
+                        <span className="text-[9px] sm:text-[10px] uppercase font-bold tracking-wider text-accent bg-accent/10 border border-accent/20 px-1.5 sm:px-2 py-0.5 rounded-full">
+                          Action Required
+                        </span>
+                      )}
                     </div>
                     <div className="text-xs text-zinc-500 flex flex-wrap items-center gap-1.5">
-                      <span>Paid on {formatDate(payment.date)}</span>
+                      <span>{activeTab === 'sent' ? 'Paid on' : 'Received on'} {formatDate(payment.date)}</span>
                       {payment.confirmedByName && (
                         <>
                           <span>•</span>
-                          <span className="text-zinc-400">Confirmed by {payment.confirmedByName}</span>
+                          <span className="text-zinc-400">
+                            {payment.status === 'Rejected' ? 'Rejected' : 'Confirmed'} by {payment.confirmedByName}
+                          </span>
                         </>
                       )}
                     </div>
                   </div>
                   <div className="text-right self-end sm:self-auto">
                     <div className="font-semibold text-white text-base sm:text-lg mb-1">{formatCurrency(payment.amount)}</div>
-                    <div className={`text-[9px] sm:text-[10px] px-1.5 sm:px-2 py-0.5 rounded-full inline-block uppercase font-bold tracking-wider ${payment.status === 'Confirmed' ? 'bg-emerald-500/10 text-emerald-500' : 'bg-amber-500/10 text-amber-500'}`}>
+                    <div
+                      className={`text-[9px] sm:text-[10px] px-1.5 sm:px-2 py-0.5 rounded-full inline-block uppercase font-bold tracking-wider ${
+                        payment.status === 'Confirmed'
+                          ? 'bg-emerald-500/10 text-emerald-500'
+                          : payment.status === 'Rejected'
+                          ? 'bg-red-500/10 text-red-400'
+                          : 'bg-amber-500/10 text-amber-500'
+                      }`}
+                    >
                       {payment.status}
                     </div>
                   </div>
@@ -164,8 +212,8 @@ export default function Payments() {
           <div className="flex items-center justify-between mt-6 pt-6 border-t border-zinc-800/50">
             <div className="text-xs sm:text-sm text-zinc-500">
               Showing <span className="text-zinc-300 font-medium">{(page - 1) * ITEMS_PER_PAGE + 1}</span> to{' '}
-              <span className="text-zinc-300 font-medium">{Math.min(page * ITEMS_PER_PAGE, payments.length)}</span> of{' '}
-              <span className="text-zinc-300 font-medium">{payments.length}</span> results
+              <span className="text-zinc-300 font-medium">{Math.min(page * ITEMS_PER_PAGE, currentPayments.length)}</span> of{' '}
+              <span className="text-zinc-300 font-medium">{currentPayments.length}</span> results
             </div>
             <div className="flex items-center gap-2">
               <button
@@ -195,9 +243,9 @@ export default function Payments() {
           <Info className="w-4 h-4 text-zinc-400" />
         </div>
         <div>
-          <h4 className="text-sm font-medium text-zinc-200 mb-1">Payment confirmation</h4>
+          <h4 className="text-sm font-medium text-zinc-200 mb-1">Payment Confirmation</h4>
           <p className="text-xs text-zinc-500 leading-relaxed">
-            New payments start as pending. Only an administrator can confirm or reject them. Confirmed payments are then included in your balance calculation.
+            New payments start as pending. Only the host of the expense (the person who paid upfront) can review and confirm them. Confirmed payments are then officially settled into balances.
           </p>
         </div>
       </div>

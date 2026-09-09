@@ -192,7 +192,7 @@ export default async function paymentRoutes(fastify: FastifyInstance) {
       // Validate that user doesn't already have pending/confirmed payments covering the applied expenses
       for (const ea of expensesApplied) {
         const { rows: partRows } = await client.query(
-          `SELECT ep.amount_owed, e.creator_id, e.title
+          `SELECT ep.amount_owed, e.creator_id, e.title, e.status
            FROM expense_participant ep
            JOIN expense e ON e.id = ep.expense_id
            WHERE ep.expense_id = $1 AND ep.user_id = $2`,
@@ -207,6 +207,14 @@ export default async function paymentRoutes(fastify: FastifyInstance) {
         if (partRows[0].creator_id === payerId) {
           await client.query('ROLLBACK');
           return reply.status(400).send({ error: 'Bad Request', message: 'You cannot pay for an expense you created' });
+        }
+
+        if (partRows[0].status !== 'Confirmed') {
+          await client.query('ROLLBACK');
+          return reply.status(400).send({
+            error: 'Bad Request',
+            message: `Payment cannot be submitted for "${partRows[0].title}" because the expense is ${partRows[0].status.toLowerCase()} and has not been approved by an administrator.`
+          });
         }
 
         const { rows: [alreadyApplied] } = await client.query(
@@ -271,6 +279,11 @@ export default async function paymentRoutes(fastify: FastifyInstance) {
 
       for (const ra of recurringItemsApplied) {
         await client.query(
+          `INSERT INTO recurring_payment (cycle_item_id, payment_id, amount_applied)
+           VALUES ($1, $2, $3)`,
+          [ra.cycleItemId, payment.id, ra.amountApplied]
+        );
+        await client.query(
           `UPDATE recurring_cycle_item
            SET payment_id = $1, status = 'Pending'
            WHERE id = $2`,
@@ -292,11 +305,12 @@ export default async function paymentRoutes(fastify: FastifyInstance) {
                   '[]'
                 ) AS "expensesApplied",
                 COALESCE(
-                  (SELECT json_agg(json_build_object('cycleItemId', rci.id, 'amountApplied', rci.amount_due, 'title', re.title, 'periodKey', rc.period_key))
-                   FROM recurring_cycle_item rci
+                  (SELECT json_agg(json_build_object('cycleItemId', rci.id, 'amountApplied', rp.amount_applied, 'title', re.title, 'periodKey', rc.period_key))
+                   FROM recurring_payment rp
+                   JOIN recurring_cycle_item rci ON rci.id = rp.cycle_item_id
                    JOIN recurring_cycle rc ON rc.id = rci.cycle_id
                    JOIN recurring_expense re ON re.id = rc.recurring_expense_id
-                   WHERE rci.payment_id = p.id),
+                   WHERE rp.payment_id = p.id),
                   '[]'
                 ) AS "recurringItemsApplied"
          FROM payment p
@@ -331,8 +345,14 @@ export default async function paymentRoutes(fastify: FastifyInstance) {
     const conditions: string[] = [];
 
     if (status) {
-      params.push(status);
-      conditions.push(`p.status = $${params.length}`);
+      if (status.includes(',')) {
+        const statuses = status.split(',').map((s) => s.trim());
+        params.push(statuses);
+        conditions.push(`p.status = ANY($${params.length})`);
+      } else {
+        params.push(status);
+        conditions.push(`p.status = $${params.length}`);
+      }
     }
     if (payerId) {
       params.push(payerId);
@@ -361,11 +381,12 @@ export default async function paymentRoutes(fastify: FastifyInstance) {
                 '[]'
               ) AS "expensesApplied",
               COALESCE(
-                (SELECT json_agg(json_build_object('cycleItemId', rci.id, 'amountApplied', rci.amount_due, 'title', re.title, 'periodKey', rc.period_key))
-                 FROM recurring_cycle_item rci
+                (SELECT json_agg(json_build_object('cycleItemId', rci.id, 'amountApplied', rp.amount_applied, 'title', re.title, 'periodKey', rc.period_key))
+                 FROM recurring_payment rp
+                 JOIN recurring_cycle_item rci ON rci.id = rp.cycle_item_id
                  JOIN recurring_cycle rc ON rc.id = rci.cycle_id
                  JOIN recurring_expense re ON re.id = rc.recurring_expense_id
-                 WHERE rci.payment_id = p.id),
+                 WHERE rp.payment_id = p.id),
                 '[]'
               ) AS "recurringItemsApplied"
        FROM payment p
@@ -398,11 +419,12 @@ export default async function paymentRoutes(fastify: FastifyInstance) {
                 '[]'
               ) AS "expensesApplied",
               COALESCE(
-                (SELECT json_agg(json_build_object('cycleItemId', rci.id, 'amountApplied', rci.amount_due, 'title', re.title, 'periodKey', rc.period_key))
-                 FROM recurring_cycle_item rci
+                (SELECT json_agg(json_build_object('cycleItemId', rci.id, 'amountApplied', rp.amount_applied, 'title', re.title, 'periodKey', rc.period_key))
+                 FROM recurring_payment rp
+                 JOIN recurring_cycle_item rci ON rci.id = rp.cycle_item_id
                  JOIN recurring_cycle rc ON rc.id = rci.cycle_id
                  JOIN recurring_expense re ON re.id = rc.recurring_expense_id
-                 WHERE rci.payment_id = p.id),
+                 WHERE rp.payment_id = p.id),
                 '[]'
               ) AS "recurringItemsApplied"
        FROM payment p
@@ -436,15 +458,16 @@ export default async function paymentRoutes(fastify: FastifyInstance) {
       return reply.status(400).send({ error: 'Bad Request', message: 'status must be "Confirmed" or "Rejected"' });
     }
 
-    // If not Admin, verify that user is the payee or payer
-    if (role !== 'Admin') {
-      const { rows: payCheck } = await query(
-        `SELECT 1 FROM payment WHERE id = $1 AND (payee_id = $2 OR payer_id = $2)`,
-        [id, userId]
-      );
-      if (payCheck.length === 0) {
-        return reply.status(403).send({ error: 'Forbidden', message: 'You do not have permission to confirm this payment' });
-      }
+    // Verify that user is the payee (the host of the expenses). Only the host can approve this payment.
+    const { rows: payCheck } = await query(
+      `SELECT payee_id AS "payeeId" FROM payment WHERE id = $1`,
+      [id]
+    );
+    if (payCheck.length === 0) {
+      return reply.status(404).send({ error: 'Not Found', message: 'Payment not found' });
+    }
+    if (payCheck[0].payeeId !== userId && role !== 'Admin') {
+      return reply.status(403).send({ error: 'Forbidden', message: 'Only the host of the expenses (payment recipient) or an administrator can approve or reject this payment' });
     }
 
     const { rows } = await query(
@@ -479,7 +502,7 @@ export default async function paymentRoutes(fastify: FastifyInstance) {
         [id]
       );
       if (existing.length > 0) {
-        return reply.send({ ...existing[0], message: 'Payment is already confirmed.' });
+        return reply.send({ ...existing[0], message: `Payment is already ${existing[0].status.toLowerCase()}.` });
       }
       return reply.status(404).send({ error: 'Not Found', message: 'Payment not found' });
     }
@@ -487,7 +510,7 @@ export default async function paymentRoutes(fastify: FastifyInstance) {
     const { rows: approverRows } = await query('SELECT name FROM "user" WHERE id = $1', [userId]);
     const confirmedByName = approverRows[0]?.name || null;
 
-    return reply.send({ ...rows[0], confirmedByName, message: status === 'Confirmed' ? 'Payment confirmed successfully.' : 'Payment rejected.' });
+    return reply.send({ ...rows[0], confirmedByName, message: `Payment ${status.toLowerCase()} successfully.` });
   };
 
   fastify.patch('/payments/:id/status', { preHandler: [fastify.authenticate] }, handleUpdatePaymentStatus);

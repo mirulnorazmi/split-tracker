@@ -36,6 +36,8 @@ export type Expense = {
   id: string;
   title: string;
   date: string;
+  createdAt?: string;
+  updatedAt?: string;
   categoryId: string;
   totalAmount: number;
   participants: string[]; // Array of User IDs

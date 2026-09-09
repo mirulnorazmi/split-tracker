@@ -7,6 +7,19 @@ const memoryCache = new Map<string, any>();
 let categoriesPromise: Promise<Category[]> | null = null;
 let prefetchPromise: Promise<void> | null = null;
 
+export function clearMemoryCache() {
+  const cats = memoryCache.get('categories');
+  memoryCache.clear();
+  if (cats) memoryCache.set('categories', cats);
+  prefetchPromise = null;
+}
+
+if (typeof window !== 'undefined') {
+  window.addEventListener('splittrack:data-changed', () => {
+    clearMemoryCache();
+  });
+}
+
 /**
  * Prefetches key data upfront from App.tsx to bypass sequential module waterfalls.
  */
@@ -258,29 +271,27 @@ export function useUsers(params?: { status?: string; role?: string }) {
 }
 
 /**
- * Lightweight hook for fetching admin pending counts for badge display.
- * Only executes network requests if the user is an Admin.
+ * Lightweight hook for fetching pending counts for badge display.
  */
 export function useAdminPendingCounts() {
   const { user } = useAuth();
-  const isAdmin = user?.role === 'Admin';
   const [counts, setCounts] = useState<{ pendingApprovals: number; pendingUsers: number }>({
     pendingApprovals: 0,
     pendingUsers: 0,
   });
 
   const fetchCounts = useCallback(async () => {
-    if (!isAdmin) return;
+    if (!user) return;
     try {
       const data = await api.getAdminPendingCounts();
       setCounts(data);
     } catch {
       // ignore
     }
-  }, [isAdmin]);
+  }, [user]);
 
   useEffect(() => {
-    if (!isAdmin) return;
+    if (!user) return;
     fetchCounts();
     const interval = setInterval(fetchCounts, 15000);
     const handleRefresh = () => { fetchCounts(); };
@@ -291,7 +302,7 @@ export function useAdminPendingCounts() {
       window.removeEventListener('splittrack:data-changed', handleRefresh);
       window.removeEventListener('focus', handleRefresh);
     };
-  }, [isAdmin, fetchCounts]);
+  }, [user, fetchCounts]);
 
   return { ...counts, refetch: fetchCounts };
 }

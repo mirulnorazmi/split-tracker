@@ -7,10 +7,19 @@ type UseExpenseFormOptions = {
   initialTitle?: string;
   initialAmount?: string;
   initialCategoryId?: string;
+  initialDate?: string;
   initialParticipants?: string[];
   initialSplitMethod?: SplitMethod;
   initialCustomAmounts?: Record<string, string>;
   lockedParticipantId?: string;
+};
+
+const getTodayDateStr = () => {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, '0');
+  const day = String(now.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
 };
 
 /**
@@ -21,6 +30,7 @@ export function useExpenseForm({
   initialTitle = '',
   initialAmount = '',
   initialCategoryId = '',
+  initialDate,
   initialParticipants = [],
   initialSplitMethod = 'equal',
   initialCustomAmounts = {},
@@ -29,6 +39,16 @@ export function useExpenseForm({
   const [title, setTitle] = useState<string>(initialTitle);
   const [amount, setAmount] = useState<string>(initialAmount);
   const [selectedCategory, setSelectedCategory] = useState<string>(initialCategoryId);
+  const [date, setDate] = useState<string>(() => {
+    if (initialDate) {
+      try {
+        return initialDate.split('T')[0];
+      } catch {
+        return getTodayDateStr();
+      }
+    }
+    return getTodayDateStr();
+  });
   const [selectedParticipants, setSelectedParticipants] = useState<string[]>(() => {
     const list = [...initialParticipants];
     if (lockedParticipantId && !list.includes(lockedParticipantId)) {
@@ -43,6 +63,16 @@ export function useExpenseForm({
   useEffect(() => {
     if (initialTitle) setTitle(initialTitle);
   }, [initialTitle]);
+
+  useEffect(() => {
+    if (initialDate) {
+      try {
+        setDate(initialDate.split('T')[0]);
+      } catch {
+        // Keep current date
+      }
+    }
+  }, [initialDate]);
 
   useEffect(() => {
     if (initialAmount) setAmount(initialAmount);
@@ -94,6 +124,7 @@ export function useExpenseForm({
     setTitle(data?.initialTitle ?? initialTitle);
     setAmount(data?.initialAmount ?? initialAmount);
     setSelectedCategory(data?.initialCategoryId ?? initialCategoryId);
+    setDate(data?.initialDate ? data.initialDate.split('T')[0] : getTodayDateStr());
     setSelectedParticipants(nextParticipants);
     setSplitMethod(data?.initialSplitMethod ?? initialSplitMethod);
     setCustomAmounts(data?.initialCustomAmounts ?? initialCustomAmounts);
@@ -144,6 +175,8 @@ export function useExpenseForm({
     handleAmountChange,
     selectedCategory,
     setSelectedCategory,
+    date,
+    setDate,
     selectedParticipants,
     toggleParticipant,
     splitMethod,

@@ -4,6 +4,7 @@ import { ArrowRight, Info, ChevronDown, ChevronUp } from 'lucide-react';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from 'recharts';
 import { useAuth } from '@/app/AuthContext';
 import { useDashboardData, useCategories } from '@/lib/hooks/useData';
+import { formatDate } from '@/lib/utils/formatDate';
 
 export default function Dashboard() {
   const navigate = useNavigate();
@@ -248,7 +249,7 @@ export default function Dashboard() {
                     >
                       <div>
                         <div className="font-medium text-zinc-200 mb-1 flex items-center gap-2 text-sm sm:text-base">{expense.title}</div>
-                        <div className="text-xs text-zinc-500">Created on {new Date(expense.date).toLocaleDateString()} • {expense.participantCount || '?'} participants</div>
+                        <div className="text-xs text-zinc-500">Event: {formatDate(expense.date)} • {expense.participantCount || '?'} participants</div>
                       </div>
                       <div className="text-right">
                         <div className="font-medium text-zinc-200 mb-1 text-sm sm:text-base">RM {Number(share).toFixed(2)}</div>

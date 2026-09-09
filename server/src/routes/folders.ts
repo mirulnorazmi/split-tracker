@@ -144,6 +144,7 @@ export default async function folderRoutes(fastify: FastifyInstance) {
    * Authenticated — get folder details, expenses, and participant balance breakdown
    */
   fastify.get('/folders/:id', { preHandler: [fastify.authenticate] }, async (request: FastifyRequest, reply: FastifyReply) => {
+    const { role, id: userId } = request.user as { role: string; id: string };
     const { id } = request.params as { id: string };
 
     const { rows: folderRows } = await query(
@@ -169,6 +170,10 @@ export default async function folderRoutes(fastify: FastifyInstance) {
 
     const folder = folderRows[0];
 
+    const expenseFilter = role === 'Admin'
+      ? 'WHERE e.folder_id = $1'
+      : `WHERE e.folder_id = $1 AND (e.status = 'Confirmed' OR e.creator_id = '${userId}')`;
+
     // Get all expenses in this folder
     const { rows: expenses } = await query(
       `SELECT
@@ -193,7 +198,7 @@ export default async function folderRoutes(fastify: FastifyInstance) {
        JOIN category c ON c.id = e.category_id
        JOIN "user" creator ON creator.id = e.creator_id
        LEFT JOIN expense_participant ep ON ep.expense_id = e.id
-       WHERE e.folder_id = $1
+       ${expenseFilter}
        GROUP BY e.id, c.id, creator.name
        ORDER BY e.date DESC`,
       [id]

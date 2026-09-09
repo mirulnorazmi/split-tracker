@@ -16,7 +16,7 @@ export default function Sidebar({ onClose, isLocked }: SidebarProps) {
   const isAdmin = user?.role === 'Admin';
 
   const { pendingApprovals, pendingUsers } = useAdminPendingCounts();
-  const pendingApprovalsCount = isAdmin ? pendingApprovals : 0;
+  const pendingApprovalsCount = pendingApprovals;
   const pendingUsersCount = isAdmin ? pendingUsers : 0;
 
   const workspaceLinks = [
@@ -41,14 +41,18 @@ export default function Sidebar({ onClose, isLocked }: SidebarProps) {
       badgeColor: 'red' as const,
       tourId: 'sidebar-approvals',
     },
-    {
-      to: '/users',
-      label: 'User Management',
-      icon: Users,
-      badgeCount: pendingUsersCount,
-      badgeColor: 'amber' as const,
-      tourId: 'sidebar-users',
-    },
+    ...(isAdmin
+      ? [
+          {
+            to: '/users',
+            label: 'User Management',
+            icon: Users,
+            badgeCount: pendingUsersCount,
+            badgeColor: 'amber' as const,
+            tourId: 'sidebar-users',
+          },
+        ]
+      : []),
   ];
 
   const handleLogout = async () => {
@@ -100,7 +104,7 @@ export default function Sidebar({ onClose, isLocked }: SidebarProps) {
         </nav>
       </div>
 
-      {isAdmin && (
+      {managementLinks.length > 0 && (
         <div className="px-4 py-4">
           <div className="text-[10px] font-bold text-zinc-500 tracking-wider mb-2 px-3 uppercase">Management</div>
           <nav className="space-y-1">
