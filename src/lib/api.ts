@@ -330,6 +330,7 @@ export interface Expense {
   status: string;
   categoryId: string;
   creatorId: string;
+  creatorName?: string;
   folderId?: string | null;
   folderName?: string;
   folderColor?: string;
@@ -351,8 +352,15 @@ export interface FolderParticipantSummary {
   totalShare: number;
   totalPaid: number;
   remainingOwed: number;
-  status: 'SETTLED' | 'PENDING';
+  paidUpfront?: number;
+  fairShare?: number;
+  reimbursementsSent?: number;
+  reimbursementsReceived?: number;
+  remainingToCollect?: number;
+  netBalance?: number;
+  status: 'SETTLED' | 'PENDING' | 'OWED' | 'OWES';
   isHost: boolean;
+  hostedExpenseCount?: number;
 }
 
 export interface Folder {

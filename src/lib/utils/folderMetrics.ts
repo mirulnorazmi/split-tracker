@@ -5,6 +5,14 @@ import {
   getUserRemainingShare,
 } from './expense';
 
+export interface PairwiseDebt {
+  toUserId: string;
+  toUserName: string;
+  amount: number;
+  expenseId: string;
+  expenseTitle: string;
+}
+
 export interface ParticipantFolderBalance {
   userId: string;
   name: string;
@@ -13,9 +21,17 @@ export interface ParticipantFolderBalance {
   email?: string;
   totalShare: number;
   totalPaid: number;
+  paidUpfront: number;
+  fairShare: number;
+  reimbursementsSent: number;
+  reimbursementsReceived: number;
   remainingOwed: number;
-  status: 'SETTLED' | 'PENDING';
+  remainingToCollect: number;
+  netBalance: number;
+  status: 'SETTLED' | 'PENDING' | 'OWED' | 'OWES';
   isHost: boolean;
+  hostedExpenseCount: number;
+  debtsOwedToOthers?: PairwiseDebt[];
 }
 
 export interface FolderFinancialMetrics {
@@ -30,7 +46,7 @@ export interface FolderFinancialMetrics {
 }
 
 /**
- * Calculates complete financial aggregation and participant balance metrics for a folder.
+ * Calculates complete enterprise-grade financial aggregation and multi-host participant balance metrics for a folder.
  */
 export function calculateFolderMetrics(
   expenses: Expense[],
@@ -52,12 +68,13 @@ export function calculateFolderMetrics(
   }
 
   // 1. Total expenses (gross sum)
-  const totalExpenses = expenses.reduce(
-    (sum, e) => sum + Number(e.totalAmount || 0),
-    0
+  const totalExpenses = Number(
+    expenses.reduce((sum, e) => sum + Number(e.totalAmount || 0), 0).toFixed(2)
   );
 
-  // 2. Collect unique participant IDs across folder expenses
+  const folderExpenseIds = new Set(expenses.map((e) => e.id));
+
+  // 2. Collect unique participant IDs across folder expenses (both hosts and participants)
   const participantIdSet = new Set<string>();
   expenses.forEach((e) => {
     if (e.creatorId) participantIdSet.add(e.creatorId);
@@ -71,32 +88,93 @@ export function calculateFolderMetrics(
 
   const participantIds = Array.from(participantIdSet);
 
-  // 3. Per-participant balances
+  const confirmedPayments = (allPayments || []).filter((p) => p.status === 'Confirmed');
+
+  // 3. Per-participant double-entry multi-host balances
   const participantBalances: ParticipantFolderBalance[] = participantIds.map((userId) => {
     const userMeta = allUsers.find((u) => u.id === userId);
-    let totalShare = 0;
-    let totalPaid = 0;
-    let remainingOwed = 0;
+    const hostedExpenses = expenses.filter((e) => e.creatorId === userId);
+    const paidUpfront = Number(
+      hostedExpenses.reduce((sum, e) => sum + Number(e.totalAmount || 0), 0).toFixed(2)
+    );
 
+    // Calculate user's fair consumption share across all folder expenses
+    let fairShare = 0;
     expenses.forEach((e) => {
-      const share = getUserShare(e, userId);
-      totalShare += share;
+      fairShare += getUserShare(e, userId);
+    });
+    fairShare = Number(fairShare.toFixed(2));
 
-      if (e.creatorId === userId) {
-        // User is the host who paid for this expense upfront!
-        // Their share was already covered out of pocket at time of purchase.
-        totalPaid += share;
-      } else {
-        const paid = getUserPaidAmount(e, userId, allPayments);
-        totalPaid += paid;
-        const remaining = getUserRemainingShare(e, userId, allPayments);
-        remainingOwed += remaining;
+    // Calculate payments sent and received for expenses in this folder
+    let reimbursementsSent = 0;
+    let reimbursementsReceived = 0;
+
+    confirmedPayments.forEach((p) => {
+      if (p.payerId === userId) {
+        (p.expensesApplied || []).forEach((ea: any) => {
+          if (folderExpenseIds.has(ea.expenseId)) {
+            reimbursementsSent += Number(ea.amountApplied || 0);
+          }
+        });
+      }
+      if (p.payeeId === userId) {
+        (p.expensesApplied || []).forEach((ea: any) => {
+          if (folderExpenseIds.has(ea.expenseId)) {
+            reimbursementsReceived += Number(ea.amountApplied || 0);
+          }
+        });
       }
     });
 
-    const isHost = expenses.some((e) => e.creatorId === userId);
-    remainingOwed = Math.max(0, Number(remainingOwed.toFixed(2)));
-    const isSettled = remainingOwed <= 0.01;
+    reimbursementsSent = Number(reimbursementsSent.toFixed(2));
+    reimbursementsReceived = Number(reimbursementsReceived.toFixed(2));
+
+    // Double-entry net balance: Total Out of Pocket (Paid Upfront + Reimbursements Sent) - Total Consumed (Fair Share + Reimbursements Received)
+    const netBalance = Number(
+      ((paidUpfront + reimbursementsSent) - (fairShare + reimbursementsReceived)).toFixed(2)
+    );
+
+    // Detailed debts owed to other hosts
+    const debtsOwedToOthers: PairwiseDebt[] = [];
+    let remainingOwed = 0;
+
+    expenses.forEach((e) => {
+      if (e.creatorId !== userId) {
+        const remaining = getUserRemainingShare(e, userId, allPayments);
+        if (remaining > 0.01) {
+          remainingOwed += remaining;
+          const hostMeta = allUsers.find((u) => u.id === e.creatorId);
+          debtsOwedToOthers.push({
+            toUserId: e.creatorId,
+            toUserName: hostMeta?.name || 'Host',
+            amount: Number(remaining.toFixed(2)),
+            expenseId: e.id,
+            expenseTitle: e.title,
+          });
+        }
+      }
+    });
+    remainingOwed = Number(remainingOwed.toFixed(2));
+
+    // Debts owed by other participants to this host
+    let remainingToCollect = 0;
+    hostedExpenses.forEach((e) => {
+      (e.participants || []).forEach((p: any) => {
+        const partId = typeof p === 'string' ? p : p.userId;
+        if (partId && partId !== userId) {
+          remainingToCollect += getUserRemainingShare(e, partId, allPayments);
+        }
+      });
+    });
+    remainingToCollect = Number(remainingToCollect.toFixed(2));
+
+    const isHost = hostedExpenses.length > 0;
+    const isSettled = Math.abs(netBalance) <= 0.01;
+    const status: 'SETTLED' | 'PENDING' | 'OWED' | 'OWES' = isSettled
+      ? 'SETTLED'
+      : netBalance > 0
+      ? 'OWED'
+      : 'OWES';
 
     return {
       userId,
@@ -104,27 +182,34 @@ export function calculateFolderMetrics(
       avatar: userMeta?.avatar || null,
       initials: userMeta?.initials || (userMeta?.name ? userMeta.name.slice(0, 2).toUpperCase() : '??'),
       email: userMeta?.email,
-      totalShare: Number(totalShare.toFixed(2)),
-      totalPaid: Number(totalPaid.toFixed(2)),
+      totalShare: fairShare,
+      totalPaid: Number((paidUpfront + reimbursementsSent).toFixed(2)),
+      paidUpfront,
+      fairShare,
+      reimbursementsSent,
+      reimbursementsReceived,
       remainingOwed,
-      status: isSettled ? 'SETTLED' : 'PENDING',
+      remainingToCollect,
+      netBalance,
+      status,
       isHost,
+      hostedExpenseCount: hostedExpenses.length,
+      debtsOwedToOthers,
     };
   });
 
-  // Sort: unsettled first, then by highest remaining balance
+  // Sort: Net creditors/hosts first (highest positive balance), then settled, then debtors by most owed
   participantBalances.sort((a, b) => {
-    if (a.status !== b.status) return a.status === 'PENDING' ? -1 : 1;
-    return b.remainingOwed - a.remainingOwed;
+    return b.netBalance - a.netBalance;
   });
 
-  // 4. Total group outstanding (true remaining debt owed by other members)
+  // 4. Total group outstanding (sum of all remaining unpaid shares owed to hosts)
   const totalOutstanding = Math.max(
     0,
     Number(participantBalances.reduce((sum, p) => sum + p.remainingOwed, 0).toFixed(2))
   );
 
-  // 5. Total collected / settled so far (Total Expenses - Total Outstanding)
+  // 5. Total collected / settled so far
   const totalCollected = Math.max(0, Number((totalExpenses - totalOutstanding).toFixed(2)));
 
   const collectionPercentage =
@@ -132,36 +217,19 @@ export function calculateFolderMetrics(
       ? Math.min(100, Math.round((totalCollected / totalExpenses) * 100))
       : 0;
 
-  // 5. Current user net balance
-  let youAreOwed = 0;
-  let youOwe = 0;
-
-  expenses.forEach((e) => {
-    if (e.creatorId === currentUserId) {
-      // Current user is the host: others owe current user
-      if (Array.isArray(e.participants)) {
-        e.participants.forEach((p: any) => {
-          const partId = typeof p === 'string' ? p : p?.userId;
-          if (partId && partId !== currentUserId) {
-            youAreOwed += getUserRemainingShare(e, partId, allPayments);
-          }
-        });
-      }
-    } else {
-      // Someone else is the host: current user owes them
-      youOwe += getUserRemainingShare(e, currentUserId, allPayments);
-    }
-  });
-
-  const netBalance = Number((youAreOwed - youOwe).toFixed(2));
+  // 6. Current user balances
+  const currentUserRecord = participantBalances.find((p) => p.userId === currentUserId);
+  const youAreOwed = currentUserRecord ? currentUserRecord.remainingToCollect : 0;
+  const youOwe = currentUserRecord ? currentUserRecord.remainingOwed : 0;
+  const netBalance = currentUserRecord ? currentUserRecord.netBalance : 0;
 
   return {
-    totalExpenses: Number(totalExpenses.toFixed(2)),
-    totalCollected: Number(totalCollected.toFixed(2)),
+    totalExpenses,
+    totalCollected,
     totalOutstanding,
     collectionPercentage,
-    youAreOwed: Number(youAreOwed.toFixed(2)),
-    youOwe: Number(youOwe.toFixed(2)),
+    youAreOwed,
+    youOwe,
     netBalance,
     participantBalances,
   };

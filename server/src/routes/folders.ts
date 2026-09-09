@@ -49,19 +49,9 @@ export default async function folderRoutes(fastify: FastifyInstance) {
   fastify.get('/folders', { preHandler: [fastify.authenticate] }, async (request: FastifyRequest, reply: FastifyReply) => {
     const { role, id: userId } = request.user as { role: string; id: string };
 
-    const filterClause =
-      role === 'Admin'
-        ? ''
-        : `WHERE f.created_by = $1
-           OR EXISTS (
-             SELECT 1 FROM expense e
-             WHERE e.folder_id = f.id
-               AND (e.creator_id = $1 OR EXISTS (
-                 SELECT 1 FROM expense_participant ep WHERE ep.expense_id = e.id AND ep.user_id = $1
-               ))
-           )`;
-
-    const params = role === 'Admin' ? [] : [userId];
+    // In collaborative workspace mode, all members can see shared folders to contribute expenses
+    const filterClause = '';
+    const params: any[] = [];
 
     const { rows } = await query(
       `SELECT
@@ -239,32 +229,65 @@ export default async function folderRoutes(fastify: FastifyInstance) {
       [id]
     );
 
-    // Per-participant summary
+    // Per-participant multi-host summary
     const participantSummary = users.map((u: any) => {
-      let totalShare = 0;
-      let totalPaid = 0;
+      const hostedExpenses = expenses.filter((e: any) => e.creatorId === u.id);
+      const paidUpfront = Number(hostedExpenses.reduce((sum: number, e: any) => sum + Number(e.totalAmount || 0), 0).toFixed(2));
+
+      let fairShare = 0;
       let remainingOwed = 0;
 
       expenses.forEach((e: any) => {
         const p = (e.participants || []).find((part: any) => part.userId === u.id);
         const share = p ? Number(p.amountOwed || 0) : 0;
-        totalShare += share;
+        fairShare += share;
 
-        if (e.creatorId === u.id) {
-          // User is the host who paid for this expense upfront!
-          totalPaid += share;
-        } else {
+        if (e.creatorId !== u.id) {
           const userPayments = payments
             .filter((pm: any) => pm.payerId === u.id && pm.expenseId === e.id && pm.status === 'Confirmed')
             .reduce((sum: number, pm: any) => sum + Number(pm.amountApplied || 0), 0);
-          totalPaid += userPayments;
           remainingOwed += Math.max(0, share - userPayments);
         }
       });
 
+      fairShare = Number(fairShare.toFixed(2));
       remainingOwed = Math.max(0, Number(remainingOwed.toFixed(2)));
-      const isSettled = remainingOwed <= 0.01;
-      const isHost = expenses.some((e: any) => e.creatorId === u.id);
+
+      const reimbursementsSent = Number(
+        payments
+          .filter((pm: any) => pm.payerId === u.id && pm.status === 'Confirmed')
+          .reduce((sum: number, pm: any) => sum + Number(pm.amountApplied || 0), 0)
+          .toFixed(2)
+      );
+
+      const reimbursementsReceived = Number(
+        payments
+          .filter((pm: any) => pm.payeeId === u.id && pm.status === 'Confirmed')
+          .reduce((sum: number, pm: any) => sum + Number(pm.amountApplied || 0), 0)
+          .toFixed(2)
+      );
+
+      // Double-entry net position: Total Out of Pocket (Paid Upfront + Reimbursements Sent) - Total Consumed (Fair Share + Reimbursements Received)
+      const netBalance = Number(((paidUpfront + reimbursementsSent) - (fairShare + reimbursementsReceived)).toFixed(2));
+
+      // Remaining debt owed by other members to this host
+      let remainingToCollect = 0;
+      hostedExpenses.forEach((e: any) => {
+        (e.participants || []).forEach((p: any) => {
+          if (p.userId !== u.id) {
+            const share = Number(p.amountOwed || 0);
+            const userPayments = payments
+              .filter((pm: any) => pm.payerId === p.userId && pm.expenseId === e.id && pm.status === 'Confirmed')
+              .reduce((sum: number, pm: any) => sum + Number(pm.amountApplied || 0), 0);
+            remainingToCollect += Math.max(0, share - userPayments);
+          }
+        });
+      });
+      remainingToCollect = Math.max(0, Number(remainingToCollect.toFixed(2)));
+
+      const isHost = hostedExpenses.length > 0;
+      const isSettled = Math.abs(netBalance) <= 0.01;
+      const status = isSettled ? 'SETTLED' : netBalance > 0 ? 'OWED' : 'OWES';
 
       return {
         userId: u.id,
@@ -272,20 +295,29 @@ export default async function folderRoutes(fastify: FastifyInstance) {
         avatar: u.avatar,
         initials: u.initials,
         email: u.email,
-        totalShare: Number(totalShare.toFixed(2)),
-        totalPaid: Number(totalPaid.toFixed(2)),
+        totalShare: fairShare,
+        totalPaid: Number((paidUpfront + reimbursementsSent).toFixed(2)),
+        paidUpfront,
+        fairShare,
+        reimbursementsSent,
+        reimbursementsReceived,
         remainingOwed,
-        status: isSettled ? 'SETTLED' : 'PENDING',
+        remainingToCollect,
+        netBalance,
+        status,
         isHost,
+        hostedExpenseCount: hostedExpenses.length,
       };
     });
 
-    const totalExpenses = expenses.reduce((sum: number, e: any) => sum + Number(e.totalAmount || 0), 0);
+    const totalExpenses = Number(expenses.reduce((sum: number, e: any) => sum + Number(e.totalAmount || 0), 0).toFixed(2));
     const totalOutstanding = Math.max(
       0,
       Number(participantSummary.reduce((sum: number, p: any) => sum + p.remainingOwed, 0).toFixed(2))
     );
-    const totalCollected = Math.max(0, Number((totalExpenses - totalOutstanding).toFixed(2)));
+    const totalCollected = Number(
+      payments.filter((pm: any) => pm.status === 'Confirmed').reduce((sum: number, pm: any) => sum + Number(pm.amountApplied || 0), 0).toFixed(2)
+    );
 
     return reply.send({
       ...folder,
@@ -372,25 +404,14 @@ export default async function folderRoutes(fastify: FastifyInstance) {
       return reply.status(404).send({ error: 'Not Found', message: 'Folder not found' });
     }
 
-    // Rule: Only the folder creator (or Admin) can add/attach expenses into the folder
-    if (role !== 'Admin' && folderRows[0].createdBy !== userId) {
-      return reply.status(403).send({ error: 'Forbidden', message: 'Only the folder owner can attach expenses to this folder' });
-    }
-
-    // Rule: The folder owner can attach only their own expenses, not expenses created by other people
+    // Verify expenses exist
     const { rows: expenseRows } = await query(
-      'SELECT id, creator_id AS "creatorId" FROM expense WHERE id = ANY($1)',
+      'SELECT id, creator_id AS "creatorId", title FROM expense WHERE id = ANY($1)',
       [expenseIds]
     );
 
-    if (role !== 'Admin') {
-      const notOwned = expenseRows.filter((e: any) => e.creatorId !== userId);
-      if (notOwned.length > 0) {
-        return reply.status(403).send({
-          error: 'Forbidden',
-          message: 'You can only attach your own expenses to this folder.',
-        });
-      }
+    if (expenseRows.length === 0) {
+      return reply.status(400).send({ error: 'Bad Request', message: 'No valid expenses found to attach' });
     }
 
     await query(
@@ -408,6 +429,7 @@ export default async function folderRoutes(fastify: FastifyInstance) {
   /**
    * DELETE /folders/:id/expenses/:expenseId
    * Authenticated — remove an expense from a folder (makes it standalone)
+   * Permitted for folder owner, the expense's host (creator), or Admin
    */
   fastify.delete('/folders/:id/expenses/:expenseId', { preHandler: [fastify.authenticate] }, async (request: FastifyRequest, reply: FastifyReply) => {
     const { role, id: userId } = request.user as { role: string; id: string };
@@ -418,9 +440,17 @@ export default async function folderRoutes(fastify: FastifyInstance) {
       return reply.status(404).send({ error: 'Not Found', message: 'Folder not found' });
     }
 
-    // Rule: Only the folder creator (or Admin) can detach expenses
-    if (role !== 'Admin' && folderRows[0].createdBy !== userId) {
-      return reply.status(403).send({ error: 'Forbidden', message: 'Only the folder owner can remove expenses from this folder' });
+    const { rows: expRows } = await query(
+      'SELECT id, creator_id AS "creatorId" FROM expense WHERE id = $1 AND folder_id = $2',
+      [expenseId, id]
+    );
+    if (expRows.length === 0) {
+      return reply.status(404).send({ error: 'Not Found', message: 'Expense not found in this folder' });
+    }
+
+    // Rule: Detaching can be done by folder owner, the expense's host, or Admin
+    if (role !== 'Admin' && folderRows[0].createdBy !== userId && expRows[0].creatorId !== userId) {
+      return reply.status(403).send({ error: 'Forbidden', message: 'Only the folder owner, the expense host, or an admin can remove this expense' });
     }
 
     const { rows } = await query(

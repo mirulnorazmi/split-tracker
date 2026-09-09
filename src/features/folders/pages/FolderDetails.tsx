@@ -173,12 +173,15 @@ export default function FolderDetails() {
     return list.filter((exp) => {
       const titleMatch = exp.title?.toLowerCase().includes(q);
       const catMatch = exp.categoryName?.toLowerCase().includes(q);
-      const notesMatch = exp.notes?.toLowerCase().includes(q);
+      const notesMatch = (exp as any).notes?.toLowerCase()?.includes(q);
       const statusMatch = exp.status?.toLowerCase().includes(q);
       const amountMatch = String(exp.totalAmount).includes(q);
-      return titleMatch || catMatch || notesMatch || statusMatch || amountMatch;
+      const hostMatch =
+        exp.creatorName?.toLowerCase().includes(q) ||
+        users.find((u) => u.id === exp.creatorId)?.name?.toLowerCase().includes(q);
+      return titleMatch || catMatch || notesMatch || statusMatch || amountMatch || hostMatch;
     });
-  }, [folder?.expenses, expenseSearch]);
+  }, [folder?.expenses, expenseSearch, users]);
 
   const visibleExpenses = filteredExpenses.slice(0, visibleExpenseCount);
 
@@ -382,74 +385,74 @@ export default function FolderDetails() {
       </header>
 
       {/* Top 4 KPI Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
         {/* Card 1: Total Expenses */}
-        <div className="bg-surface-alt border border-zinc-800 rounded-3xl p-5 flex flex-col justify-between">
-          <span className="text-[11px] font-semibold text-zinc-500 uppercase tracking-wider mb-2">
+        <div className="bg-surface-alt border border-zinc-800 rounded-2xl sm:rounded-3xl p-3.5 sm:p-5 flex flex-col justify-between">
+          <span className="text-[10px] sm:text-[11px] font-semibold text-zinc-500 uppercase tracking-wider mb-2">
             Total Incurred
           </span>
           <div>
-            <div className="text-3xl font-light text-white">
+            <div className="text-xl sm:text-2xl lg:text-3xl font-light text-white tracking-tight">
               RM {metrics.totalExpenses.toFixed(2)}
             </div>
-            <span className="text-xs text-zinc-500 mt-1 inline-block">
+            <span className="text-[10px] sm:text-xs text-zinc-500 mt-0.5 sm:mt-1 inline-block leading-tight">
               {folder.expenses?.length || 0} total transaction(s)
             </span>
           </div>
         </div>
 
         {/* Card 2: Total Collected */}
-        <div className="bg-surface-alt border border-zinc-800 rounded-3xl p-5 flex flex-col justify-between">
+        <div className="bg-surface-alt border border-zinc-800 rounded-2xl sm:rounded-3xl p-3.5 sm:p-5 flex flex-col justify-between">
           <div className="flex items-center justify-between mb-2">
-            <span className="text-[11px] font-semibold text-emerald-400 uppercase tracking-wider">
+            <span className="text-[10px] sm:text-[11px] font-semibold text-emerald-400 uppercase tracking-wider">
               Total Collected
             </span>
-            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+            <span className="text-[9px] sm:text-[10px] font-bold px-1.5 sm:px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
               {metrics.collectionPercentage}%
             </span>
           </div>
           <div>
-            <div className="text-3xl font-light text-emerald-400">
+            <div className="text-xl sm:text-2xl lg:text-3xl font-light text-emerald-400 tracking-tight">
               RM {metrics.totalCollected.toFixed(2)}
             </div>
-            <span className="text-xs text-zinc-500 mt-1 inline-block">
+            <span className="text-[10px] sm:text-xs text-zinc-500 mt-0.5 sm:mt-1 inline-block leading-tight">
               Confirmed settlements
             </span>
           </div>
         </div>
 
         {/* Card 3: Total Outstanding */}
-        <div className="bg-surface-alt border border-zinc-800 rounded-3xl p-5 flex flex-col justify-between">
+        <div className="bg-surface-alt border border-zinc-800 rounded-2xl sm:rounded-3xl p-3.5 sm:p-5 flex flex-col justify-between">
           <div className="flex items-center justify-between mb-2">
-            <span className="text-[11px] font-semibold text-amber-400 uppercase tracking-wider">
+            <span className="text-[10px] sm:text-[11px] font-semibold text-amber-400 uppercase tracking-wider">
               Total Outstanding
             </span>
             <span
-              className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/20 flex items-center gap-1"
+              className="text-[9px] sm:text-[10px] font-bold px-1.5 sm:px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/20 flex items-center gap-1"
               title={`${metrics.participantBalances.filter((p) => p.status === 'PENDING').length} unsettled`}
             >
               <span>{metrics.participantBalances.filter((p) => p.status === 'PENDING').length}</span>
-              <User className="w-3 h-3" />
+              <User className="w-2.5 h-2.5 sm:w-3 sm:h-3" />
             </span>
           </div>
           <div>
-            <div className="text-3xl font-light text-amber-400">
+            <div className="text-xl sm:text-2xl lg:text-3xl font-light text-amber-400 tracking-tight">
               RM {metrics.totalOutstanding.toFixed(2)}
             </div>
-            <span className="text-xs text-zinc-500 mt-1 inline-block">
+            <span className="text-[10px] sm:text-xs text-zinc-500 mt-0.5 sm:mt-1 inline-block leading-tight">
               Remaining group debt
             </span>
           </div>
         </div>
 
         {/* Card 4: Your Balance */}
-        <div className="bg-surface-alt border border-zinc-800 rounded-3xl p-5 flex flex-col justify-between">
-          <span className="text-[11px] font-semibold text-zinc-400 uppercase tracking-wider mb-2">
+        <div className="bg-surface-alt border border-zinc-800 rounded-2xl sm:rounded-3xl p-3.5 sm:p-5 flex flex-col justify-between">
+          <span className="text-[10px] sm:text-[11px] font-semibold text-zinc-400 uppercase tracking-wider mb-2">
             Your Balance
           </span>
           <div>
             <div
-              className={`text-3xl font-light ${
+              className={`text-xl sm:text-2xl lg:text-3xl font-light tracking-tight ${
                 metrics.netBalance > 0
                   ? 'text-emerald-400'
                   : metrics.netBalance < 0
@@ -463,7 +466,7 @@ export default function FolderDetails() {
                 ? `-RM ${Math.abs(metrics.netBalance).toFixed(2)}`
                 : 'RM 0.00'}
             </div>
-            <span className="text-xs text-zinc-500 mt-1 inline-block">
+            <span className="text-[10px] sm:text-xs text-zinc-500 mt-0.5 sm:mt-1 inline-block leading-tight">
               {metrics.netBalance > 0
                 ? 'You are owed money'
                 : metrics.netBalance < 0
@@ -712,7 +715,9 @@ export default function FolderDetails() {
           ) : (
             visibleParticipants.map((participant) => {
               const isCurrentUser = participant.userId === currentUserId;
-              const isSettled = participant.status === 'SETTLED';
+              const isSettled = Math.abs(participant.netBalance) <= 0.01;
+              const isCreditor = participant.netBalance > 0.01;
+              const isDebtor = participant.netBalance < -0.01;
 
               return (
                 <div
@@ -742,43 +747,82 @@ export default function FolderDetails() {
                           </span>
                         )}
                         {participant.isHost && (
-                          <span className="text-[10px] bg-zinc-800 text-zinc-400 px-2 py-0.2 rounded-full font-medium">
-                            HOST
+                          <span className="text-[10px] bg-zinc-800 text-zinc-300 border border-zinc-700 px-2 py-0.5 rounded-full font-medium flex items-center gap-1">
+                            <User className="w-2.5 h-2.5 text-accent" />
+                            HOST {participant.hostedExpenseCount > 1 ? `(${participant.hostedExpenseCount})` : ''}
                           </span>
                         )}
                       </div>
-                      <p className="text-xs text-zinc-500 mt-0.5">
-                        Total Share: <strong className="text-zinc-300 font-normal">RM {participant.totalShare.toFixed(2)}</strong> • Paid: <strong className="text-zinc-300 font-normal">RM {participant.totalPaid.toFixed(2)}</strong>
+                      <p className="text-xs text-zinc-500 mt-1">
+                        {participant.paidUpfront > 0 ? (
+                          <>
+                            Paid <strong className="text-zinc-300 font-normal">RM {participant.paidUpfront.toFixed(2)}</strong> upfront • Share <strong className="text-zinc-300 font-normal">RM {participant.fairShare.toFixed(2)}</strong>
+                            {participant.reimbursementsReceived > 0 && (
+                              <span> • Collected <strong className="text-emerald-400 font-normal">RM {participant.reimbursementsReceived.toFixed(2)}</strong></span>
+                            )}
+                            {participant.reimbursementsSent > 0 && (
+                              <span> • Reimbursed <strong className="text-zinc-300 font-normal">RM {participant.reimbursementsSent.toFixed(2)}</strong></span>
+                            )}
+                          </>
+                        ) : (
+                          <>
+                            Fair Share: <strong className="text-zinc-300 font-normal">RM {participant.fairShare.toFixed(2)}</strong>
+                            {participant.reimbursementsSent > 0 ? (
+                              <span> • Reimbursed: <strong className="text-zinc-300 font-normal">RM {participant.reimbursementsSent.toFixed(2)}</strong></span>
+                            ) : (
+                              <span> • No payments yet</span>
+                            )}
+                          </>
+                        )}
                       </p>
+                      {participant.debtsOwedToOthers && participant.debtsOwedToOthers.length > 0 && (
+                        <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
+                          {participant.debtsOwedToOthers.map((d) => (
+                            <span key={d.expenseId} className="text-[10px] px-2 py-0.5 rounded-md bg-zinc-900 border border-zinc-800 text-zinc-400">
+                              Owes <span className="text-zinc-300 font-medium">{d.toUserName}</span>: RM {d.amount.toFixed(2)} ({d.expenseTitle})
+                            </span>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   </div>
 
                   <div className="flex items-center justify-between sm:justify-end gap-3 shrink-0 pt-2 sm:pt-0 border-t sm:border-t-0 border-zinc-800/60">
                     <div className="text-left sm:text-right">
                       <span className="text-[10px] text-zinc-500 uppercase tracking-wider font-semibold block">
-                        Remaining Balance
+                        Net Balance
                       </span>
                       <span
                         className={`text-sm font-semibold ${
-                          isSettled ? 'text-emerald-400' : 'text-amber-400'
+                          isCreditor
+                            ? 'text-emerald-400'
+                            : isDebtor
+                            ? 'text-amber-400'
+                            : 'text-zinc-400'
                         }`}
                       >
-                        {isSettled ? 'RM 0.00' : `RM ${participant.remainingOwed.toFixed(2)}`}
+                        {isCreditor
+                          ? `+RM ${participant.netBalance.toFixed(2)}`
+                          : isDebtor
+                          ? `-RM ${Math.abs(participant.netBalance).toFixed(2)}`
+                          : 'RM 0.00'}
                       </span>
                     </div>
 
                     <div className="flex items-center gap-2">
                       <span
                         className={`text-xs font-semibold px-3 py-1 rounded-full border ${
-                          isSettled
+                          isCreditor
                             ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
-                            : 'bg-amber-500/10 text-amber-400 border-amber-500/20'
+                            : isDebtor
+                            ? 'bg-amber-500/10 text-amber-400 border-amber-500/20'
+                            : 'bg-zinc-800/50 text-zinc-400 border-zinc-700/50'
                         }`}
                       >
-                        {isSettled ? 'Settled' : 'Unpaid'}
+                        {isCreditor ? 'Gets back' : isDebtor ? 'Owes' : 'Settled'}
                       </span>
 
-                      {isCurrentUser && !isSettled && (
+                      {isCurrentUser && isDebtor && (
                         <Link
                           to="/payments/new"
                           className="text-xs font-semibold text-accent hover:underline px-2 py-1"
@@ -825,22 +869,20 @@ export default function FolderDetails() {
               All shared expenditures and receipts assigned to this folder
             </p>
           </div>
-          {isCreatorOrAdmin && (
-            <div className="flex items-center gap-2">
-              <button
-                onClick={() => setIsAttachModalOpen(true)}
-                className="px-3 py-1.5 rounded-xl bg-zinc-900 border border-zinc-800 text-zinc-300 hover:text-white text-xs font-medium transition-colors flex items-center gap-1 cursor-pointer"
-              >
-                <Paperclip className="w-3.5 h-3.5" /> Attach
-              </button>
-              <Link
-                to={`/expenses/new?folderId=${folder.id}`}
-                className="px-3.5 py-1.5 rounded-xl bg-accent text-accent-text text-xs font-bold transition-opacity hover:opacity-90 flex items-center gap-1 cursor-pointer"
-              >
-                <Plus className="w-3.5 h-3.5" /> Add Expense
-              </Link>
-            </div>
-          )}
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setIsAttachModalOpen(true)}
+              className="px-3 py-1.5 rounded-xl bg-zinc-900 border border-zinc-800 text-zinc-300 hover:text-white text-xs font-medium transition-colors flex items-center gap-1 cursor-pointer"
+            >
+              <Paperclip className="w-3.5 h-3.5" /> Attach
+            </button>
+            <Link
+              to={`/expenses/new?folderId=${folder.id}`}
+              className="px-3.5 py-1.5 rounded-xl bg-accent text-accent-text text-xs font-bold transition-opacity hover:opacity-90 flex items-center gap-1 cursor-pointer"
+            >
+              <Plus className="w-3.5 h-3.5" /> Add Expense
+            </Link>
+          </div>
         </div>
 
         {/* Filter / Search Bar for Expenses */}
@@ -850,7 +892,7 @@ export default function FolderDetails() {
               <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500 pointer-events-none" />
               <input
                 type="text"
-                placeholder="Search expenses by title, category, status..."
+                placeholder="Search expenses by title, category, host..."
                 value={expenseSearch}
                 onChange={(e) => setExpenseSearch(e.target.value)}
                 className="w-full bg-zinc-900 border border-zinc-800 rounded-xl pl-9 pr-8 py-2 text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-accent transition-colors"
@@ -874,26 +916,22 @@ export default function FolderDetails() {
               <Receipt className="w-8 h-8 mx-auto text-zinc-600 mb-2" />
               <p className="text-sm text-zinc-400 font-medium">No expenses in this folder yet</p>
               <p className="text-xs text-zinc-500 mt-1 max-w-sm mx-auto mb-4">
-                {isCreatorOrAdmin
-                  ? 'Add your expenses or attach existing transactions to begin tracking collective debts.'
-                  : `Only the folder host (${folder.creatorName || 'owner'}) can add expenses to this folder.`}
+                Add your expenses or attach existing transactions from any host to begin tracking collective debts.
               </p>
-              {isCreatorOrAdmin && (
-                <div className="flex items-center justify-center gap-2">
-                  <button
-                    onClick={() => setIsAttachModalOpen(true)}
-                    className="px-3.5 py-2 rounded-xl bg-zinc-900 border border-zinc-700 text-zinc-300 text-xs font-medium cursor-pointer hover:text-white"
-                  >
-                    Attach Existing
-                  </button>
-                  <Link
-                    to={`/expenses/new?folderId=${folder.id}`}
-                    className="px-4 py-2 rounded-xl bg-accent text-accent-text text-xs font-bold"
-                  >
-                    Create Expense
-                  </Link>
-                </div>
-              )}
+              <div className="flex items-center justify-center gap-2">
+                <button
+                  onClick={() => setIsAttachModalOpen(true)}
+                  className="px-3.5 py-2 rounded-xl bg-zinc-900 border border-zinc-700 text-zinc-300 text-xs font-medium cursor-pointer hover:text-white"
+                >
+                  Attach Existing
+                </button>
+                <Link
+                  to={`/expenses/new?folderId=${folder.id}`}
+                  className="px-4 py-2 rounded-xl bg-accent text-accent-text text-xs font-bold"
+                >
+                  Create Expense
+                </Link>
+              </div>
             </div>
           ) : filteredExpenses.length === 0 ? (
             <div className="py-8 text-center text-zinc-500 text-xs">
@@ -902,6 +940,9 @@ export default function FolderDetails() {
           ) : (
             visibleExpenses.map((expense) => {
               const numParticipants = (expense.participants || []).length;
+              const expenseHostName = expense.creatorName || users.find((u) => u.id === expense.creatorId)?.name || 'Host';
+              const canDetach = isCreatorOrAdmin || expense.creatorId === currentUserId;
+
               return (
                 <div
                   key={expense.id}
@@ -940,6 +981,11 @@ export default function FolderDetails() {
                           <span>Event: <strong className="text-zinc-300 font-normal">{formatDate(expense.date)}</strong></span>
                         </span>
                         <span>•</span>
+                        <span className="inline-flex items-center gap-1 text-zinc-300 bg-zinc-900 border border-zinc-800/80 px-1.5 py-0.5 rounded-md">
+                          <User className="w-3 h-3 text-accent" />
+                          <span>Host: <strong className="font-medium text-white">{expenseHostName}</strong></span>
+                        </span>
+                        <span>•</span>
                         <span>{expense.categoryName || 'General'}</span>
                         <span>•</span>
                         <span>{numParticipants} participant(s)</span>
@@ -955,7 +1001,7 @@ export default function FolderDetails() {
                     </div>
 
                     <div className="flex items-center gap-1">
-                      {isCreatorOrAdmin && (
+                      {canDetach && (
                         <button
                           onClick={(e) => handleDetachExpense(e, expense.id, expense.title)}
                           title="Remove from folder (retains as standalone expense)"

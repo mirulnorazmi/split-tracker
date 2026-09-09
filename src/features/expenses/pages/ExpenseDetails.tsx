@@ -36,10 +36,9 @@ export default function ExpenseDetails({ expenseId: propExpenseId, onBack }: Exp
 
   useEffect(() => {
     api.listFolders().then((data) => {
-      const myFolders = data.filter((f) => currentUser?.role === 'Admin' || f.createdBy === currentUser?.id);
-      setFolders(myFolders);
+      setFolders(data);
     }).catch(console.error);
-  }, [currentUser]);
+  }, []);
 
   useEffect(() => {
     if (expense) {

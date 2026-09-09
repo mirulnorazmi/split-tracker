@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { X, Plus, Check, Search, Receipt } from 'lucide-react';
+import React, { useState, useEffect, useMemo } from 'react';
+import { X, Plus, Check, Search, Receipt, Filter, User } from 'lucide-react';
 import { api, Expense } from '@/lib/api';
 import { useAuth } from '@/app/AuthContext';
 import { formatDate } from '@/lib/utils/formatDate';
@@ -23,6 +23,7 @@ export function AttachExpensesModal({
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [search, setSearch] = useState('');
+  const [hostFilter, setHostFilter] = useState('all');
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -33,15 +34,12 @@ export function AttachExpensesModal({
       setError(null);
       setSelectedIds([]);
       setSearch('');
+      setHostFilter('all');
 
       api.listExpenses()
         .then((all) => {
-          // Rule: Folder owner can only attach their own expenses
-          const available = all.filter(
-            (e) =>
-              e.folderId !== folderId &&
-              (currentUser?.role === 'Admin' || e.creatorId === currentUser?.id)
-          );
+          // Allow attaching any standalone expense or expense not currently in this folder
+          const available = all.filter((e) => e.folderId !== folderId);
           setExpenses(available);
         })
         .catch((err) => {
@@ -49,13 +47,33 @@ export function AttachExpensesModal({
         })
         .finally(() => setIsLoading(false));
     }
-  }, [isOpen, folderId, currentUser]);
+  }, [isOpen, folderId]);
+
+  // Extract unique hosts from available expenses for the filter dropdown
+  const hosts = useMemo(() => {
+    const map = new Map<string, string>();
+    expenses.forEach((e) => {
+      if (e.creatorId) {
+        map.set(e.creatorId, e.creatorName || 'Host');
+      }
+    });
+    return Array.from(map.entries()).map(([id, name]) => ({ id, name }));
+  }, [expenses]);
+
+  const filtered = useMemo(() => {
+    return expenses.filter((e) => {
+      const matchesSearch =
+        e.title.toLowerCase().includes(search.toLowerCase()) ||
+        (e.creatorName && e.creatorName.toLowerCase().includes(search.toLowerCase())) ||
+        (e.categoryName && e.categoryName.toLowerCase().includes(search.toLowerCase()));
+
+      const matchesHost = hostFilter === 'all' || e.creatorId === hostFilter;
+
+      return matchesSearch && matchesHost;
+    });
+  }, [expenses, search, hostFilter]);
 
   if (!isOpen) return null;
-
-  const filtered = expenses.filter((e) =>
-    e.title.toLowerCase().includes(search.toLowerCase())
-  );
 
   const toggleSelect = (id: string) => {
     setSelectedIds((prev) =>
@@ -92,7 +110,7 @@ export function AttachExpensesModal({
               Attach Expenses to Folder
             </h2>
             <p className="text-xs text-zinc-400 mt-0.5">
-              Select standalone expenses to bundle into <span className="text-white font-medium">{folderName}</span>
+              Select expenses from any host to bundle into <span className="text-white font-medium">{folderName}</span>
             </p>
           </div>
           <button
@@ -109,16 +127,35 @@ export function AttachExpensesModal({
           </div>
         )}
 
-        {/* Search */}
-        <div className="relative shrink-0">
-          <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-zinc-500" />
-          <input
-            type="text"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search expenses by title..."
-            className="w-full bg-zinc-950 border border-zinc-800 rounded-xl pl-10 pr-4 py-2 text-xs text-white placeholder-zinc-600 focus:outline-none focus:border-accent"
-          />
+        {/* Search & Host Filter Controls */}
+        <div className="flex flex-col sm:flex-row items-center gap-2.5 shrink-0">
+          <div className="relative flex-1 w-full">
+            <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-zinc-500" />
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search expenses by title or host..."
+              className="w-full bg-zinc-950 border border-zinc-800 rounded-xl pl-10 pr-4 py-2 text-xs text-white placeholder-zinc-600 focus:outline-none focus:border-accent"
+            />
+          </div>
+
+          {hosts.length > 1 && (
+            <div className="w-full sm:w-auto shrink-0">
+              <select
+                value={hostFilter}
+                onChange={(e) => setHostFilter(e.target.value)}
+                className="w-full sm:w-auto bg-zinc-950 border border-zinc-800 text-zinc-300 text-xs rounded-xl px-3 py-2 focus:outline-none focus:border-accent cursor-pointer"
+              >
+                <option value="all">All Hosts ({hosts.length})</option>
+                {hosts.map((h) => (
+                  <option key={h.id} value={h.id}>
+                    Host: {h.name} {h.id === currentUser?.id ? '(You)' : ''}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
         </div>
 
         {/* Expense List */}
@@ -131,11 +168,18 @@ export function AttachExpensesModal({
             <div className="py-12 text-center text-zinc-500 border border-dashed border-zinc-800 rounded-2xl p-6">
               <Receipt className="w-8 h-8 mx-auto text-zinc-600 mb-2" />
               <p className="text-sm text-zinc-400 font-medium">No available expenses found</p>
-              <p className="text-xs text-zinc-500 mt-1">All your existing expenses may already be assigned to this folder.</p>
+              <p className="text-xs text-zinc-500 mt-1">
+                {hostFilter !== 'all' || search
+                  ? 'Try adjusting your search or host filter.'
+                  : 'All existing expenses are already assigned to this folder.'}
+              </p>
             </div>
           ) : (
             filtered.map((expense) => {
               const isSelected = selectedIds.includes(expense.id);
+              const isYou = expense.creatorId === currentUser?.id;
+              const hostName = isYou ? 'You' : expense.creatorName || 'Host';
+
               return (
                 <div
                   key={expense.id}
@@ -157,7 +201,12 @@ export function AttachExpensesModal({
                       <Check className="w-3.5 h-3.5" />
                     </div>
                     <div className="min-w-0">
-                      <p className="text-sm font-medium text-white truncate">{expense.title}</p>
+                      <div className="flex items-center gap-2 mb-0.5">
+                        <p className="text-sm font-medium text-white truncate">{expense.title}</p>
+                        <span className="text-[10px] bg-zinc-800 text-zinc-400 px-2 py-0.2 rounded-full font-medium shrink-0">
+                          Host: {hostName}
+                        </span>
+                      </div>
                       <p className="text-[11px] text-zinc-500">
                         {formatDate(expense.date)} • {expense.categoryName || 'General'}
                         {expense.folderName && (

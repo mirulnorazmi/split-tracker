@@ -29,15 +29,13 @@ export default function NewExpense() {
   useEffect(() => {
     api.listFolders()
       .then((data) => {
-        // Rule: Only the folder owner can add expenses to their folder
-        const myFolders = data.filter((f) => currentUser?.role === 'Admin' || f.createdBy === currentUser?.id);
-        setFolders(myFolders);
-        if (initialFolderId && !myFolders.some((f) => f.id === initialFolderId)) {
+        setFolders(data);
+        if (initialFolderId && !data.some((f) => f.id === initialFolderId)) {
           setSelectedFolderId('');
         }
       })
       .catch((err) => console.error('Failed to load folders:', err));
-  }, [currentUser, initialFolderId]);
+  }, [initialFolderId]);
 
   const form = useExpenseForm({
     initialCategoryId: categories[0]?.id || '',

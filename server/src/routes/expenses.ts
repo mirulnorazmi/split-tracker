@@ -36,14 +36,11 @@ export default async function expenseRoutes(fastify: FastifyInstance) {
     // Admin-created expenses are auto-confirmed; Member-created expenses require Admin approval
     const status = role === 'Admin' ? 'Confirmed' : 'Pending';
 
-    // Rule: If assigning to a folder, only the folder owner can add expenses to it
+    // Verify folder exists if specified
     if (folderId) {
-      const { rows: fRows } = await query('SELECT created_by AS "createdBy" FROM folder WHERE id = $1', [folderId]);
+      const { rows: fRows } = await query('SELECT id FROM folder WHERE id = $1', [folderId]);
       if (fRows.length === 0) {
         return reply.status(400).send({ error: 'Bad Request', message: 'Selected folder does not exist' });
-      }
-      if (role !== 'Admin' && fRows[0].createdBy !== creatorId) {
-        return reply.status(403).send({ error: 'Forbidden', message: 'Only the folder owner can add expenses to this folder' });
       }
     }
 
@@ -214,14 +211,11 @@ export default async function expenseRoutes(fastify: FastifyInstance) {
       }
     }
 
-    // Rule: If assigning to a folder, only the folder owner can add expenses to it
+    // Verify folder exists if specified
     if (folderId) {
-      const { rows: fRows } = await query('SELECT created_by AS "createdBy" FROM folder WHERE id = $1', [folderId]);
+      const { rows: fRows } = await query('SELECT id FROM folder WHERE id = $1', [folderId]);
       if (fRows.length === 0) {
         return reply.status(400).send({ error: 'Bad Request', message: 'Selected folder does not exist' });
-      }
-      if (role !== 'Admin' && fRows[0].createdBy !== userId) {
-        return reply.status(403).send({ error: 'Forbidden', message: 'Only the folder owner can add expenses to this folder' });
       }
     }
 
