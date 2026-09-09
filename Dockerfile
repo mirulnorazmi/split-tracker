@@ -7,7 +7,7 @@ WORKDIR /app
 
 # Install dependencies
 COPY package*.json ./
-RUN npm ci
+RUN npm ci && npm cache clean --force
 
 # Copy all source files and compile frontend
 COPY . .
@@ -26,7 +26,7 @@ ENV HOST=0.0.0.0
 
 # Install production dependencies
 COPY package*.json ./
-RUN npm ci --omit=dev && npm install -g tsx
+RUN npm ci --omit=dev && npm install -g tsx && npm cache clean --force
 
 # Copy built frontend static assets from builder
 COPY --from=builder /app/dist ./dist
