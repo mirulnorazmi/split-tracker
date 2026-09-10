@@ -48,6 +48,30 @@ export async function prefetchAppData() {
 }
 
 /**
+ * Triggers a global data refresh across the entire application:
+ * 1. Purges memory cache.
+ * 2. Pre-fetches fresh core statistics, payments, expenses, and categories.
+ * 3. Dispatches 'splittrack:data-changed' to trigger active hook revalidations.
+ * 4. Ensures a pleasant minimum animation dwell time (600ms).
+ */
+export async function refreshGlobalData(): Promise<void> {
+  const startTime = Date.now();
+  clearMemoryCache();
+
+  try {
+    await prefetchAppData();
+  } finally {
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('splittrack:data-changed'));
+    }
+    const elapsed = Date.now() - startTime;
+    if (elapsed < 600) {
+      await new Promise((resolve) => setTimeout(resolve, 600 - elapsed));
+    }
+  }
+}
+
+/**
  * Hook for fetching dashboard stats and recent activity.
  */
 export function useDashboardData() {

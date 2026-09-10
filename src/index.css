@@ -35,6 +35,14 @@ body {
   background: #3f3f46;
 }
 
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
 /* Enterprise Loader Styles (matches index.html for zero CLS on hydrate/refresh) */
 .splittrack-loader-container {
   display: flex;

@@ -1,6 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Repeat, Plus, Users, Calendar, ArrowRight, CheckCircle2, Trash2, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Repeat, Plus, Users, Calendar, ArrowRight, CheckCircle2, Trash2, Loader2 } from 'lucide-react';
 import { api, RecurringExpense } from '@/lib/api';
 import { useAuth } from '@/app/AuthContext';
 import { formatCurrency } from '@/lib/utils/currency';
@@ -11,11 +11,9 @@ export default function Subscriptions() {
   const [subscriptions, setSubscriptions] = useState<RecurringExpense[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const isAdmin = currentUser?.role === 'Admin';
-  const [page, setPage] = useState(1);
-  const ITEMS_PER_PAGE = 10;
-  
-  const totalPages = Math.ceil(subscriptions.length / ITEMS_PER_PAGE);
-  const paginatedSubscriptions = subscriptions.slice((page - 1) * ITEMS_PER_PAGE, page * ITEMS_PER_PAGE);
+  const [visibleCount, setVisibleCount] = useState(5);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const sentinelRef = useRef<HTMLDivElement>(null);
 
   const handleDelete = async (e: React.MouseEvent, id: string, title: string) => {
     e.stopPropagation();
@@ -52,6 +50,30 @@ export default function Subscriptions() {
       window.removeEventListener('focus', handleRefresh);
     };
   }, []);
+
+  useEffect(() => {
+    const sentinel = sentinelRef.current;
+    const container = scrollContainerRef.current;
+    if (!sentinel || !container) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting) {
+          setVisibleCount((prev) => Math.min(prev + 5, subscriptions.length));
+        }
+      },
+      {
+        root: container,
+        rootMargin: '120px',
+        threshold: 0.1,
+      }
+    );
+
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [subscriptions.length]);
+
+  const visibleSubscriptions = subscriptions.slice(0, visibleCount);
 
   const totalMonthly = subscriptions.reduce((sum, s) => sum + Number(s.totalAmount), 0);
   const totalYourShare = subscriptions.reduce((sum, s) => {
@@ -159,9 +181,15 @@ export default function Subscriptions() {
           <div className="text-sm text-zinc-400">{subscriptions.length} plans</div>
         </div>
 
-        <div className="space-y-2">
+        <div
+          ref={scrollContainerRef}
+          className="max-h-[540px] overflow-y-auto space-y-2 pr-1.5 custom-scrollbar"
+        >
           {isLoading ? (
-            <div className="py-12 text-center text-zinc-500">Loading subscriptions...</div>
+            <div className="py-12 text-center text-zinc-500 flex items-center justify-center gap-2">
+              <Loader2 className="w-4 h-4 animate-spin text-accent" />
+              <span>Loading subscriptions...</span>
+            </div>
           ) : subscriptions.length === 0 ? (
             <div className="py-12 flex flex-col items-center justify-center text-center">
               <div className="w-12 h-12 rounded-xl bg-zinc-800/50 border border-zinc-700/50 flex items-center justify-center mb-3 text-zinc-400">
@@ -179,7 +207,7 @@ export default function Subscriptions() {
               </Link>
             </div>
           ) : (
-            paginatedSubscriptions.map((sub) => {
+            visibleSubscriptions.map((sub) => {
               const isCreator = sub.creatorId === currentUser?.id;
               const hasUnpaid = !isCreator && Number(sub.yourTotalUnpaid || 0) > 0;
 
@@ -187,7 +215,7 @@ export default function Subscriptions() {
                 <button
                   key={sub.id}
                   onClick={() => navigate(`/subscriptions/${sub.id}`)}
-                  className="w-full text-left p-4 rounded-lg hover:bg-zinc-800/50 flex flex-col sm:flex-row sm:justify-between sm:items-center gap-4 transition-colors cursor-pointer group"
+                  className="w-full text-left p-4 rounded-xl bg-zinc-950/40 border border-zinc-850/60 hover:bg-zinc-800/50 hover:border-zinc-700/80 flex flex-col sm:flex-row sm:justify-between sm:items-center gap-4 transition-all cursor-pointer group shadow-sm"
                 >
                   <div className="flex gap-4 items-center">
                     <div className="w-10 h-10 rounded-lg bg-zinc-800/50 border border-zinc-700/50 flex items-center justify-center shrink-0 text-zinc-400">
@@ -273,35 +301,34 @@ export default function Subscriptions() {
               );
             })
           )}
+
+          {/* Infinite Scroll Sentinel / Trigger */}
+          {visibleCount < subscriptions.length && (
+            <div ref={sentinelRef} className="pt-3 pb-2 text-center">
+              <button
+                type="button"
+                onClick={() => setVisibleCount((prev) => Math.min(prev + 5, subscriptions.length))}
+                className="px-4 py-2 rounded-xl bg-zinc-900 border border-zinc-800 hover:border-zinc-700 text-xs font-medium text-zinc-400 hover:text-white transition-colors cursor-pointer inline-flex items-center gap-2 shadow-sm"
+              >
+                <Loader2 className="w-3.5 h-3.5 animate-spin text-accent" />
+                Load More Plans ({subscriptions.length - visibleCount} remaining)
+              </button>
+            </div>
+          )}
         </div>
 
-        {/* Pagination Controls */}
-        {!isLoading && totalPages >= 1 && (
-          <div className="flex items-center justify-between p-4 border-t border-zinc-800/50">
-            <div className="text-xs sm:text-sm text-zinc-500">
-              Showing <span className="text-zinc-300 font-medium">{(page - 1) * ITEMS_PER_PAGE + 1}</span> to{' '}
-              <span className="text-zinc-300 font-medium">{Math.min(page * ITEMS_PER_PAGE, subscriptions.length)}</span> of{' '}
-              <span className="text-zinc-300 font-medium">{subscriptions.length}</span> results
+        {/* Footer Summary */}
+        {subscriptions.length > 0 && (
+          <div className="flex items-center justify-between mt-4 pt-4 border-t border-zinc-800/60 text-xs text-zinc-500">
+            <div>
+              Showing <span className="text-zinc-300 font-medium">{Math.min(visibleCount, subscriptions.length)}</span> of{' '}
+              <span className="text-zinc-300 font-medium">{subscriptions.length}</span> plans
             </div>
-            <div className="flex items-center gap-2">
-              <button
-                onClick={() => setPage((p) => Math.max(1, p - 1))}
-                disabled={page === 1}
-                className="p-1.5 sm:p-2 rounded-lg border border-zinc-800 text-zinc-400 hover:text-white hover:bg-zinc-800 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-              >
-                <ChevronLeft className="w-4 h-4" />
-              </button>
-              <div className="text-sm font-medium text-zinc-300 px-2 sm:px-4">
-                Page {page} of {totalPages}
-              </div>
-              <button
-                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-                disabled={page === totalPages}
-                className="p-1.5 sm:p-2 rounded-lg border border-zinc-800 text-zinc-400 hover:text-white hover:bg-zinc-800 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-              >
-                <ChevronRight className="w-4 h-4" />
-              </button>
-            </div>
+            {visibleCount >= subscriptions.length ? (
+              <span className="text-zinc-500 font-medium">All plans loaded</span>
+            ) : (
+              <span className="text-zinc-500 hidden sm:inline">Scroll inside table for more</span>
+            )}
           </div>
         )}
       </div>

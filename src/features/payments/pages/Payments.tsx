@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import { Info, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Info, Loader2 } from 'lucide-react';
 import { useAuth } from '@/app/AuthContext';
 import { useDashboardData, usePayments, useExpenses, useUsers } from '@/lib/hooks/useData';
 import { formatCurrency } from '@/lib/utils/currency';
@@ -15,15 +15,41 @@ export default function Payments() {
   const { expenses } = useExpenses();
   const { users } = useUsers();
 
-  const [page, setPage] = useState(1);
-  const ITEMS_PER_PAGE = 10;
+  const [visibleCount, setVisibleCount] = useState(5);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const sentinelRef = useRef<HTMLDivElement>(null);
 
   const currentPayments = activeTab === 'sent' ? sentPayments : receivedPayments;
   const isLoading = activeTab === 'sent' ? sentLoading : receivedLoading;
   const pendingReceivedCount = receivedPayments.filter((p) => p.status === 'Pending').length;
 
-  const totalPages = Math.ceil(currentPayments.length / ITEMS_PER_PAGE);
-  const paginatedPayments = currentPayments.slice((page - 1) * ITEMS_PER_PAGE, page * ITEMS_PER_PAGE);
+  useEffect(() => {
+    setVisibleCount(5);
+  }, [activeTab]);
+
+  useEffect(() => {
+    const sentinel = sentinelRef.current;
+    const container = scrollContainerRef.current;
+    if (!sentinel || !container) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting) {
+          setVisibleCount((prev) => Math.min(prev + 5, currentPayments.length));
+        }
+      },
+      {
+        root: container,
+        rootMargin: '120px',
+        threshold: 0.1,
+      }
+    );
+
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [currentPayments.length]);
+
+  const visiblePayments = currentPayments.slice(0, visibleCount);
 
   const confirmedPayments = stats?.confirmedPayments ?? 0;
   const pendingPayments = stats?.pendingPayments ?? 0;
@@ -87,7 +113,7 @@ export default function Payments() {
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-4 sm:mb-6">
           <div className="flex items-center gap-2 bg-zinc-950 p-1 rounded-xl border border-zinc-800 w-fit">
             <button
-              onClick={() => { setActiveTab('sent'); setPage(1); }}
+              onClick={() => setActiveTab('sent')}
               className={`px-3 sm:px-4 py-1.5 rounded-lg text-xs sm:text-sm font-medium transition-all cursor-pointer ${
                 activeTab === 'sent'
                   ? 'bg-zinc-800 text-white shadow-sm'
@@ -97,7 +123,7 @@ export default function Payments() {
               Sent ({sentPayments.length})
             </button>
             <button
-              onClick={() => { setActiveTab('received'); setPage(1); }}
+              onClick={() => setActiveTab('received')}
               className={`px-3 sm:px-4 py-1.5 rounded-lg text-xs sm:text-sm font-medium transition-all cursor-pointer flex items-center gap-2 ${
                 activeTab === 'received'
                   ? 'bg-zinc-800 text-white shadow-sm'
@@ -115,9 +141,15 @@ export default function Payments() {
           <div className="text-xs text-zinc-500">{currentPayments.length} records</div>
         </div>
 
-        <div className="space-y-3">
+        <div
+          ref={scrollContainerRef}
+          className="max-h-[540px] overflow-y-auto space-y-3 pr-1.5 custom-scrollbar"
+        >
           {isLoading ? (
-            <div className="py-12 text-center text-zinc-500">Loading payments...</div>
+            <div className="py-12 text-center text-zinc-500 flex items-center justify-center gap-2">
+              <Loader2 className="w-4 h-4 animate-spin text-accent" />
+              <span>Loading payments...</span>
+            </div>
           ) : currentPayments.length === 0 ? (
             <div className="py-12 flex flex-col items-center justify-center text-center">
               <div className="text-zinc-400 font-medium mb-1">
@@ -130,7 +162,7 @@ export default function Payments() {
               </div>
             </div>
           ) : (
-            paginatedPayments.map((payment) => {
+            visiblePayments.map((payment) => {
               const payee = users.find((u) => u.id === payment.payeeId);
               const payeeName = payment.payeeName || payee?.name || 'Unknown';
               const payer = users.find((u) => u.id === payment.payerId);
@@ -205,35 +237,34 @@ export default function Payments() {
               );
             })
           )}
+
+          {/* Infinite Scroll Sentinel / Trigger */}
+          {visibleCount < currentPayments.length && (
+            <div ref={sentinelRef} className="pt-3 pb-2 text-center">
+              <button
+                type="button"
+                onClick={() => setVisibleCount((prev) => Math.min(prev + 5, currentPayments.length))}
+                className="px-4 py-2 rounded-xl bg-zinc-900 border border-zinc-800 hover:border-zinc-700 text-xs font-medium text-zinc-400 hover:text-white transition-colors cursor-pointer inline-flex items-center gap-2 shadow-sm"
+              >
+                <Loader2 className="w-3.5 h-3.5 animate-spin text-accent" />
+                Load More Payments ({currentPayments.length - visibleCount} remaining)
+              </button>
+            </div>
+          )}
         </div>
-        
-        {/* Pagination Controls */}
-        {totalPages >= 1 && (
-          <div className="flex items-center justify-between mt-6 pt-6 border-t border-zinc-800/50">
-            <div className="text-xs sm:text-sm text-zinc-500">
-              Showing <span className="text-zinc-300 font-medium">{(page - 1) * ITEMS_PER_PAGE + 1}</span> to{' '}
-              <span className="text-zinc-300 font-medium">{Math.min(page * ITEMS_PER_PAGE, currentPayments.length)}</span> of{' '}
-              <span className="text-zinc-300 font-medium">{currentPayments.length}</span> results
+
+        {/* Footer Summary */}
+        {currentPayments.length > 0 && (
+          <div className="flex items-center justify-between mt-4 pt-4 border-t border-zinc-800/60 text-xs text-zinc-500">
+            <div>
+              Showing <span className="text-zinc-300 font-medium">{Math.min(visibleCount, currentPayments.length)}</span> of{' '}
+              <span className="text-zinc-300 font-medium">{currentPayments.length}</span> records
             </div>
-            <div className="flex items-center gap-2">
-              <button
-                onClick={() => setPage((p) => Math.max(1, p - 1))}
-                disabled={page === 1}
-                className="p-1 sm:p-2 rounded-lg border border-zinc-800 text-zinc-400 hover:text-white hover:bg-zinc-800 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-              >
-                <ChevronLeft className="w-4 h-4" />
-              </button>
-              <div className="text-sm font-medium text-zinc-300 px-2 sm:px-4">
-                Page {page} of {totalPages}
-              </div>
-              <button
-                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-                disabled={page === totalPages}
-                className="p-1 sm:p-2 rounded-lg border border-zinc-800 text-zinc-400 hover:text-white hover:bg-zinc-800 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-              >
-                <ChevronRight className="w-4 h-4" />
-              </button>
-            </div>
+            {visibleCount >= currentPayments.length ? (
+              <span className="text-zinc-500 font-medium">All records loaded</span>
+            ) : (
+              <span className="text-zinc-500 hidden sm:inline">Scroll inside table for more</span>
+            )}
           </div>
         )}
       </div>

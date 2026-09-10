@@ -1,6 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import { ArrowRight, Plus, Search, X, Trash2, ChevronLeft, ChevronRight, Folder as FolderIcon, Calendar } from 'lucide-react';
+import { ArrowRight, Plus, Search, X, Trash2, Folder as FolderIcon, Calendar, Loader2 } from 'lucide-react';
 import { useAuth } from '@/app/AuthContext';
 import { useExpenses, usePayments, useCategories, useUsers } from '@/lib/hooks/useData';
 import { isExpenseClosed, getUserShare, getUserPaidAmount, getUserPendingAmount, getUserRemainingShare } from '@/lib/utils/expense';
@@ -29,8 +29,9 @@ export default function Expenses() {
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'open' | 'closed'>('all');
   
-  const [page, setPage] = useState(1);
-  const ITEMS_PER_PAGE = 10;
+  const [visibleCount, setVisibleCount] = useState(5);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const sentinelRef = useRef<HTMLDivElement>(null);
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
 
@@ -92,13 +93,33 @@ export default function Expenses() {
   };
 
   useEffect(() => {
-    setPage(1);
+    setVisibleCount(5);
   }, [listTab, searchQuery, statusFilter, startDate, endDate]);
 
+  useEffect(() => {
+    const sentinel = sentinelRef.current;
+    const container = scrollContainerRef.current;
+    if (!sentinel || !container) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting) {
+          setVisibleCount((prev) => Math.min(prev + 5, filteredExpenses.length));
+        }
+      },
+      {
+        root: container,
+        rootMargin: '120px',
+        threshold: 0.1,
+      }
+    );
+
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [filteredExpenses.length]);
+
   const hasActiveFilters = Boolean(searchQuery || statusFilter !== 'all' || startDate || endDate);
-  
-  const totalPages = Math.ceil(filteredExpenses.length / ITEMS_PER_PAGE);
-  const paginatedExpenses = filteredExpenses.slice((page - 1) * ITEMS_PER_PAGE, page * ITEMS_PER_PAGE);
+  const visibleExpenses = filteredExpenses.slice(0, visibleCount);
 
   return (
     <div className="max-w-5xl mx-auto space-y-6 sm:space-y-8 animate-in fade-in duration-500">
@@ -142,41 +163,41 @@ export default function Expenses() {
               placeholder="Search sessions..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full bg-zinc-950 border border-zinc-800 rounded-xl pl-9 pr-4 py-2 text-sm text-white focus:outline-none focus:border-zinc-600 transition-colors placeholder:text-zinc-600"
+              className="w-full h-10 bg-zinc-950 border border-zinc-800 rounded-xl pl-9 pr-4 text-sm text-white focus:outline-none focus:border-zinc-600 transition-colors placeholder:text-zinc-600"
             />
           </div>
 
-          <div className="flex flex-wrap items-center gap-2 sm:gap-3">
+          <div className="flex items-center gap-1.5 sm:gap-2.5 w-full lg:w-auto overflow-x-auto no-scrollbar pb-0.5 sm:pb-0">
             {/* Date From */}
-            <div className="flex items-center gap-1.5 bg-zinc-950 border border-zinc-800 rounded-xl px-2.5 py-1.5">
-              <span className="text-[11px] text-zinc-500 font-medium uppercase">From</span>
+            <label className="h-10 flex items-center gap-1.5 bg-zinc-950 border border-zinc-800 rounded-xl px-2.5 shrink-0 cursor-pointer focus-within:border-zinc-600 transition-colors">
+              <span className="text-[11px] text-zinc-500 font-semibold uppercase shrink-0">From</span>
               <input
                 type="date"
                 value={startDate}
                 onChange={(e) => setStartDate(e.target.value)}
-                className="bg-transparent text-xs text-zinc-200 focus:outline-none"
+                className="bg-transparent text-xs text-zinc-200 focus:outline-none cursor-pointer [color-scheme:dark]"
               />
-            </div>
+            </label>
 
             {/* Date To */}
-            <div className="flex items-center gap-1.5 bg-zinc-950 border border-zinc-800 rounded-xl px-2.5 py-1.5">
-              <span className="text-[11px] text-zinc-500 font-medium uppercase">To</span>
+            <label className="h-10 flex items-center gap-1.5 bg-zinc-950 border border-zinc-800 rounded-xl px-2.5 shrink-0 cursor-pointer focus-within:border-zinc-600 transition-colors">
+              <span className="text-[11px] text-zinc-500 font-semibold uppercase shrink-0">To</span>
               <input
                 type="date"
                 value={endDate}
                 onChange={(e) => setEndDate(e.target.value)}
-                className="bg-transparent text-xs text-zinc-200 focus:outline-none"
+                className="bg-transparent text-xs text-zinc-200 focus:outline-none cursor-pointer [color-scheme:dark]"
               />
-            </div>
+            </label>
 
             {/* Status Filter */}
             <select
               value={statusFilter}
               onChange={(e) => setStatusFilter(e.target.value as 'all' | 'open' | 'closed')}
-              className="bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-xs sm:text-sm text-white focus:outline-none focus:border-zinc-600 transition-colors cursor-pointer"
+              className="h-10 bg-zinc-950 border border-zinc-800 rounded-xl px-2.5 sm:px-3 text-xs sm:text-sm text-white focus:outline-none focus:border-zinc-600 transition-colors cursor-pointer shrink-0"
             >
               <option value="all">All Status</option>
-              <option value="open">Open (Pending payments)</option>
+              <option value="open">Open (Pending)</option>
               <option value="closed">Closed (All paid)</option>
             </select>
 
@@ -188,7 +209,7 @@ export default function Expenses() {
                   setStartDate('');
                   setEndDate('');
                 }}
-                className="px-2.5 py-2 text-xs text-zinc-400 hover:text-white hover:bg-zinc-800 rounded-xl transition-colors flex items-center gap-1 cursor-pointer"
+                className="h-10 px-2.5 text-xs text-zinc-400 hover:text-white hover:bg-zinc-800 rounded-xl transition-colors flex items-center gap-1 cursor-pointer shrink-0 border border-zinc-800/60"
                 title="Reset all filters"
               >
                 <X className="w-3.5 h-3.5" />
@@ -198,15 +219,21 @@ export default function Expenses() {
           </div>
         </div>
 
-        <div className="space-y-3">
+        <div
+          ref={scrollContainerRef}
+          className="max-h-[580px] overflow-y-auto space-y-3 pr-1.5 custom-scrollbar"
+        >
           {expensesLoading ? (
-            <div className="text-center py-10 text-zinc-500">Loading expenses...</div>
+            <div className="text-center py-12 text-zinc-500 flex items-center justify-center gap-2">
+              <Loader2 className="w-4 h-4 animate-spin text-accent" />
+              <span>Loading expenses...</span>
+            </div>
           ) : filteredExpenses.length === 0 ? (
             <div className="text-center py-10 text-zinc-500 border border-dashed border-zinc-800 rounded-xl">
               No sessions found matching your filters.
             </div>
           ) : (
-            paginatedExpenses.map((expense) => {
+            visibleExpenses.map((expense) => {
               const category = categories.find((c) => c.id === expense.categoryId);
               const numParticipants = expense.participants?.length || 1;
               const totalShare = getUserShare(expense, currentUserId);
@@ -338,35 +365,34 @@ export default function Expenses() {
               );
             })
           )}
+
+          {/* Infinite Scroll Sentinel / Trigger */}
+          {visibleCount < filteredExpenses.length && (
+            <div ref={sentinelRef} className="pt-3 pb-2 text-center">
+              <button
+                type="button"
+                onClick={() => setVisibleCount((prev) => Math.min(prev + 5, filteredExpenses.length))}
+                className="px-4 py-2 rounded-xl bg-zinc-900 border border-zinc-800 hover:border-zinc-700 text-xs font-medium text-zinc-400 hover:text-white transition-colors cursor-pointer inline-flex items-center gap-2 shadow-sm"
+              >
+                <Loader2 className="w-3.5 h-3.5 animate-spin text-accent" />
+                Load More Expenses ({filteredExpenses.length - visibleCount} remaining)
+              </button>
+            </div>
+          )}
         </div>
         
-        {/* Pagination Controls */}
-        {totalPages >= 1 && (
-          <div className="flex items-center justify-between mt-6 pt-6 border-t border-zinc-800/50">
-            <div className="text-xs sm:text-sm text-zinc-500">
-              Showing <span className="text-zinc-300 font-medium">{(page - 1) * ITEMS_PER_PAGE + 1}</span> to{' '}
-              <span className="text-zinc-300 font-medium">{Math.min(page * ITEMS_PER_PAGE, filteredExpenses.length)}</span> of{' '}
-              <span className="text-zinc-300 font-medium">{filteredExpenses.length}</span> results
+        {/* Footer Summary */}
+        {filteredExpenses.length > 0 && (
+          <div className="flex items-center justify-between mt-4 pt-4 border-t border-zinc-800/60 text-xs text-zinc-500">
+            <div>
+              Showing <span className="text-zinc-300 font-medium">{Math.min(visibleCount, filteredExpenses.length)}</span> of{' '}
+              <span className="text-zinc-300 font-medium">{filteredExpenses.length}</span> expenses
             </div>
-            <div className="flex items-center gap-2">
-              <button
-                onClick={() => setPage((p) => Math.max(1, p - 1))}
-                disabled={page === 1}
-                className="p-1 sm:p-2 rounded-lg border border-zinc-800 text-zinc-400 hover:text-white hover:bg-zinc-800 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-              >
-                <ChevronLeft className="w-4 h-4" />
-              </button>
-              <div className="text-sm font-medium text-zinc-300 px-2 sm:px-4">
-                Page {page} of {totalPages}
-              </div>
-              <button
-                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-                disabled={page === totalPages}
-                className="p-1 sm:p-2 rounded-lg border border-zinc-800 text-zinc-400 hover:text-white hover:bg-zinc-800 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-              >
-                <ChevronRight className="w-4 h-4" />
-              </button>
-            </div>
+            {visibleCount >= filteredExpenses.length ? (
+              <span className="text-zinc-500 font-medium">All expenses loaded</span>
+            ) : (
+              <span className="text-zinc-500 hidden sm:inline">Scroll inside table for more</span>
+            )}
           </div>
         )}
       </div>

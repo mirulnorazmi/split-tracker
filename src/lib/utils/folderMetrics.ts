@@ -6,11 +6,17 @@ import {
 } from './expense';
 
 export interface PairwiseDebt {
+  fromUserId?: string;
+  fromUserName?: string;
   toUserId: string;
   toUserName: string;
   amount: number;
   expenseId: string;
   expenseTitle: string;
+  expenseDate?: string;
+  expenseTotalAmount?: number;
+  shareAmount?: number;
+  categoryName?: string;
 }
 
 export interface ParticipantFolderBalance {
@@ -32,6 +38,7 @@ export interface ParticipantFolderBalance {
   isHost: boolean;
   hostedExpenseCount: number;
   debtsOwedToOthers?: PairwiseDebt[];
+  debtsOwedByOthers?: PairwiseDebt[];
 }
 
 export interface FolderFinancialMetrics {
@@ -42,6 +49,7 @@ export interface FolderFinancialMetrics {
   youAreOwed: number;
   youOwe: number;
   netBalance: number;
+  unsettledParticipantsCount: number;
   participantBalances: ParticipantFolderBalance[];
 }
 
@@ -63,6 +71,7 @@ export function calculateFolderMetrics(
       youAreOwed: 0,
       youOwe: 0,
       netBalance: 0,
+      unsettledParticipantsCount: 0,
       participantBalances: [],
     };
   }
@@ -145,11 +154,17 @@ export function calculateFolderMetrics(
           remainingOwed += remaining;
           const hostMeta = allUsers.find((u) => u.id === e.creatorId);
           debtsOwedToOthers.push({
+            fromUserId: userId,
+            fromUserName: userMeta?.name || 'You',
             toUserId: e.creatorId,
-            toUserName: hostMeta?.name || 'Host',
+            toUserName: hostMeta?.name || e.creatorName || 'Host',
             amount: Number(remaining.toFixed(2)),
             expenseId: e.id,
             expenseTitle: e.title,
+            expenseDate: e.date,
+            expenseTotalAmount: Number(e.totalAmount || 0),
+            shareAmount: getUserShare(e, userId),
+            categoryName: e.categoryName,
           });
         }
       }
@@ -157,12 +172,30 @@ export function calculateFolderMetrics(
     remainingOwed = Number(remainingOwed.toFixed(2));
 
     // Debts owed by other participants to this host
+    const debtsOwedByOthers: PairwiseDebt[] = [];
     let remainingToCollect = 0;
     hostedExpenses.forEach((e) => {
       (e.participants || []).forEach((p: any) => {
         const partId = typeof p === 'string' ? p : p.userId;
         if (partId && partId !== userId) {
-          remainingToCollect += getUserRemainingShare(e, partId, allPayments);
+          const rem = getUserRemainingShare(e, partId, allPayments);
+          if (rem > 0.01) {
+            remainingToCollect += rem;
+            const debtorMeta = allUsers.find((u) => u.id === partId);
+            debtsOwedByOthers.push({
+              fromUserId: partId,
+              fromUserName: debtorMeta?.name || 'Participant',
+              toUserId: userId,
+              toUserName: userMeta?.name || 'Host',
+              amount: Number(rem.toFixed(2)),
+              expenseId: e.id,
+              expenseTitle: e.title,
+              expenseDate: e.date,
+              expenseTotalAmount: Number(e.totalAmount || 0),
+              shareAmount: getUserShare(e, partId),
+              categoryName: e.categoryName,
+            });
+          }
         }
       });
     });
@@ -195,6 +228,7 @@ export function calculateFolderMetrics(
       isHost,
       hostedExpenseCount: hostedExpenses.length,
       debtsOwedToOthers,
+      debtsOwedByOthers,
     };
   });
 
@@ -223,6 +257,11 @@ export function calculateFolderMetrics(
   const youOwe = currentUserRecord ? currentUserRecord.remainingOwed : 0;
   const netBalance = currentUserRecord ? currentUserRecord.netBalance : 0;
 
+  // Count of members who still have remaining debts to settle in this folder
+  const unsettledParticipantsCount = participantBalances.filter(
+    (p) => p.remainingOwed > 0.01
+  ).length;
+
   return {
     totalExpenses,
     totalCollected,
@@ -231,6 +270,7 @@ export function calculateFolderMetrics(
     youAreOwed,
     youOwe,
     netBalance,
+    unsettledParticipantsCount,
     participantBalances,
   };
 }

@@ -21,6 +21,7 @@ import {
   X,
   Loader2,
   ChevronDown,
+  ChevronRight,
   Calendar,
 } from 'lucide-react';
 import {
@@ -38,11 +39,12 @@ import {
 import { api, FolderDetail, Expense, Payment } from '@/lib/api';
 import { useAuth } from '@/app/AuthContext';
 import { useUsers, usePayments } from '@/lib/hooks/useData';
-import { calculateFolderMetrics } from '@/lib/utils/folderMetrics';
+import { calculateFolderMetrics, ParticipantFolderBalance } from '@/lib/utils/folderMetrics';
 import { BackButton } from '@/components';
 import { formatDate } from '@/lib/utils/formatDate';
 import { FolderModal } from '../components/FolderModal';
 import { AttachExpensesModal } from '../components/AttachExpensesModal';
+import { ParticipantBreakdownModal } from '../components/ParticipantBreakdownModal';
 
 export default function FolderDetails() {
   const { id } = useParams<{ id: string }>();
@@ -55,6 +57,7 @@ export default function FolderDetails() {
   const [isLoading, setIsLoading] = useState(true);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isAttachModalOpen, setIsAttachModalOpen] = useState(false);
+  const [selectedParticipantForBreakdown, setSelectedParticipantForBreakdown] = useState<ParticipantFolderBalance | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const fetchFolderDetails = useCallback(async () => {
@@ -105,12 +108,14 @@ export default function FolderDetails() {
   // ── Participant Ledger Infinite Scroll & Filter State ──────────────────────
   const [participantSearch, setParticipantSearch] = useState('');
   const [participantSort, setParticipantSort] = useState<'highest' | 'lowest' | 'default'>('highest');
-  const [visibleParticipantCount, setVisibleParticipantCount] = useState(10);
+  const [visibleParticipantCount, setVisibleParticipantCount] = useState(5);
+  const participantContainerRef = React.useRef<HTMLDivElement>(null);
   const participantSentinelRef = React.useRef<HTMLDivElement>(null);
 
   // ── Folder Expenses Infinite Scroll & Filter State ─────────────────────────
   const [expenseSearch, setExpenseSearch] = useState('');
   const [visibleExpenseCount, setVisibleExpenseCount] = useState(5);
+  const expenseContainerRef = React.useRef<HTMLDivElement>(null);
   const expenseSentinelRef = React.useRef<HTMLDivElement>(null);
 
   // Calculate high-fidelity metrics safely
@@ -125,6 +130,7 @@ export default function FolderDetails() {
         userPaid: 0,
         userOwed: 0,
         netBalance: 0,
+        unsettledParticipantsCount: 0,
         participantBalances: [],
       };
     }
@@ -133,7 +139,7 @@ export default function FolderDetails() {
 
   // Reset counts when search/sort changes
   useEffect(() => {
-    setVisibleParticipantCount(10);
+    setVisibleParticipantCount(5);
   }, [participantSearch, participantSort]);
 
   useEffect(() => {
@@ -188,20 +194,21 @@ export default function FolderDetails() {
   // Infinite scroll observer for participants
   useEffect(() => {
     const el = participantSentinelRef.current;
-    if (!el) return;
+    const root = participantContainerRef.current;
+    if (!el || !root) return;
 
     const observer = new IntersectionObserver(
       (entries) => {
         if (entries[0].isIntersecting) {
           setVisibleParticipantCount((prev) => {
             if (prev < filteredParticipants.length) {
-              return Math.min(prev + 10, filteredParticipants.length);
+              return Math.min(prev + 5, filteredParticipants.length);
             }
             return prev;
           });
         }
       },
-      { threshold: 0.1, rootMargin: '120px' }
+      { root, threshold: 0.1, rootMargin: '120px' }
     );
 
     observer.observe(el);
@@ -211,7 +218,8 @@ export default function FolderDetails() {
   // Infinite scroll observer for expenses
   useEffect(() => {
     const el = expenseSentinelRef.current;
-    if (!el) return;
+    const root = expenseContainerRef.current;
+    if (!el || !root) return;
 
     const observer = new IntersectionObserver(
       (entries) => {
@@ -224,7 +232,7 @@ export default function FolderDetails() {
           });
         }
       },
-      { threshold: 0.1, rootMargin: '120px' }
+      { root, threshold: 0.1, rootMargin: '120px' }
     );
 
     observer.observe(el);
@@ -429,9 +437,9 @@ export default function FolderDetails() {
             </span>
             <span
               className="text-[9px] sm:text-[10px] font-bold px-1.5 sm:px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/20 flex items-center gap-1"
-              title={`${metrics.participantBalances.filter((p) => p.status === 'PENDING').length} unsettled`}
+              title={`${metrics.unsettledParticipantsCount} ${metrics.unsettledParticipantsCount === 1 ? 'member' : 'members'} with remaining debt`}
             >
-              <span>{metrics.participantBalances.filter((p) => p.status === 'PENDING').length}</span>
+              <span>{metrics.unsettledParticipantsCount}</span>
               <User className="w-2.5 h-2.5 sm:w-3 sm:h-3" />
             </span>
           </div>
@@ -705,7 +713,10 @@ export default function FolderDetails() {
           </div>
         </div>
 
-        <div className="space-y-2.5 pt-2">
+        <div
+          ref={participantContainerRef}
+          className="max-h-[540px] overflow-y-auto space-y-2.5 pt-2 pr-1.5 custom-scrollbar"
+        >
           {filteredParticipants.length === 0 ? (
             <div className="py-8 text-center text-zinc-500 text-xs">
               {participantSearch
@@ -722,7 +733,9 @@ export default function FolderDetails() {
               return (
                 <div
                   key={participant.userId}
-                  className="p-4 rounded-2xl bg-zinc-950/60 border border-zinc-800/80 hover:border-zinc-700 transition-colors flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+                  onClick={() => setSelectedParticipantForBreakdown(participant)}
+                  className="p-4 rounded-2xl bg-zinc-950/60 border border-zinc-800/80 hover:border-zinc-700 hover:bg-zinc-950 transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-3 cursor-pointer group shadow-sm"
+                  title="Click to view detailed financial position & breakdown"
                 >
                   <div className="flex items-center gap-3.5 min-w-0">
                     <div className="w-10 h-10 rounded-xl bg-zinc-800 border border-zinc-700 flex items-center justify-center text-zinc-300 text-sm font-bold shrink-0 overflow-hidden">
@@ -738,7 +751,7 @@ export default function FolderDetails() {
                     </div>
                     <div className="min-w-0">
                       <div className="flex items-center gap-2">
-                        <span className="text-sm font-medium text-white truncate">
+                        <span className="text-sm font-medium text-white group-hover:text-accent transition-colors truncate">
                           {participant.name}
                         </span>
                         {isCurrentUser && (
@@ -775,15 +788,6 @@ export default function FolderDetails() {
                           </>
                         )}
                       </p>
-                      {participant.debtsOwedToOthers && participant.debtsOwedToOthers.length > 0 && (
-                        <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
-                          {participant.debtsOwedToOthers.map((d) => (
-                            <span key={d.expenseId} className="text-[10px] px-2 py-0.5 rounded-md bg-zinc-900 border border-zinc-800 text-zinc-400">
-                              Owes <span className="text-zinc-300 font-medium">{d.toUserName}</span>: RM {d.amount.toFixed(2)} ({d.expenseTitle})
-                            </span>
-                          ))}
-                        </div>
-                      )}
                     </div>
                   </div>
 
@@ -825,11 +829,16 @@ export default function FolderDetails() {
                       {isCurrentUser && isDebtor && (
                         <Link
                           to="/payments/new"
+                          onClick={(e) => e.stopPropagation()}
                           className="text-xs font-semibold text-accent hover:underline px-2 py-1"
                         >
                           Settle
                         </Link>
                       )}
+
+                      <span className="p-1 text-zinc-600 group-hover:text-zinc-300 transition-colors hidden sm:inline-block">
+                        <ChevronRight className="w-4 h-4" />
+                      </span>
                     </div>
                   </div>
                 </div>
@@ -837,13 +846,13 @@ export default function FolderDetails() {
             })
           )}
 
-          {/* Infinite loading trigger / sentinel for participants (Max 10 per batch) */}
+          {/* Infinite loading trigger / sentinel for participants (Max 5 per batch) */}
           {visibleParticipantCount < filteredParticipants.length && (
-            <div ref={participantSentinelRef} className="pt-3 text-center">
+            <div ref={participantSentinelRef} className="pt-3 pb-2 text-center">
               <button
                 type="button"
-                onClick={() => setVisibleParticipantCount((prev) => Math.min(prev + 10, filteredParticipants.length))}
-                className="px-4 py-2 rounded-xl bg-zinc-900 border border-zinc-800 hover:border-zinc-700 text-xs font-medium text-zinc-400 hover:text-white transition-colors cursor-pointer inline-flex items-center gap-2"
+                onClick={() => setVisibleParticipantCount((prev) => Math.min(prev + 5, filteredParticipants.length))}
+                className="px-4 py-2 rounded-xl bg-zinc-900 border border-zinc-800 hover:border-zinc-700 text-xs font-medium text-zinc-400 hover:text-white transition-colors cursor-pointer inline-flex items-center gap-2 shadow-sm"
               >
                 <Loader2 className="w-3.5 h-3.5 animate-spin text-accent" />
                 Load More Participants ({filteredParticipants.length - visibleParticipantCount} remaining)
@@ -851,6 +860,19 @@ export default function FolderDetails() {
             </div>
           )}
         </div>
+
+        {/* Participant Ledger Footer Summary */}
+        {filteredParticipants.length > 0 && (
+          <div className="flex items-center justify-between pt-3 mt-1 border-t border-zinc-800/60 text-xs text-zinc-500">
+            <div>
+              Showing <span className="text-zinc-300 font-medium">{Math.min(visibleParticipantCount, filteredParticipants.length)}</span> of{' '}
+              <span className="text-zinc-300 font-medium">{filteredParticipants.length}</span> participants
+            </div>
+            {visibleParticipantCount < filteredParticipants.length && (
+              <span className="text-[11px] text-zinc-600">Scroll down to load more</span>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Nested Expenses List */}
@@ -910,7 +932,10 @@ export default function FolderDetails() {
           </div>
         )}
 
-        <div className="space-y-3 pt-2">
+        <div
+          ref={expenseContainerRef}
+          className="max-h-[540px] overflow-y-auto space-y-3 pt-2 pr-1.5 custom-scrollbar"
+        >
           {(!folder.expenses || folder.expenses.length === 0) ? (
             <div className="py-12 text-center text-zinc-500 border border-dashed border-zinc-800 rounded-2xl p-6">
               <Receipt className="w-8 h-8 mx-auto text-zinc-600 mb-2" />
@@ -1022,11 +1047,11 @@ export default function FolderDetails() {
 
           {/* Infinite loading trigger / sentinel for expenses (Max 5 per batch) */}
           {visibleExpenseCount < filteredExpenses.length && (
-            <div ref={expenseSentinelRef} className="pt-3 text-center">
+            <div ref={expenseSentinelRef} className="pt-3 pb-2 text-center">
               <button
                 type="button"
                 onClick={() => setVisibleExpenseCount((prev) => Math.min(prev + 5, filteredExpenses.length))}
-                className="px-4 py-2 rounded-xl bg-zinc-900 border border-zinc-800 hover:border-zinc-700 text-xs font-medium text-zinc-400 hover:text-white transition-colors cursor-pointer inline-flex items-center gap-2"
+                className="px-4 py-2 rounded-xl bg-zinc-900 border border-zinc-800 hover:border-zinc-700 text-xs font-medium text-zinc-400 hover:text-white transition-colors cursor-pointer inline-flex items-center gap-2 shadow-sm"
               >
                 <Loader2 className="w-3.5 h-3.5 animate-spin text-accent" />
                 Load More Expenses ({filteredExpenses.length - visibleExpenseCount} remaining)
@@ -1034,6 +1059,19 @@ export default function FolderDetails() {
             </div>
           )}
         </div>
+
+        {/* Folder Expenses Footer Summary */}
+        {filteredExpenses.length > 0 && (
+          <div className="flex items-center justify-between pt-3 mt-1 border-t border-zinc-800/60 text-xs text-zinc-500">
+            <div>
+              Showing <span className="text-zinc-300 font-medium">{Math.min(visibleExpenseCount, filteredExpenses.length)}</span> of{' '}
+              <span className="text-zinc-300 font-medium">{filteredExpenses.length}</span> expenses
+            </div>
+            {visibleExpenseCount < filteredExpenses.length && (
+              <span className="text-[11px] text-zinc-600">Scroll down to load more</span>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Edit Folder Modal */}
@@ -1051,6 +1089,15 @@ export default function FolderDetails() {
         folderName={folder.name}
         onClose={() => setIsAttachModalOpen(false)}
         onSuccess={() => fetchFolderDetails()}
+      />
+
+      {/* Participant Breakdown Modal */}
+      <ParticipantBreakdownModal
+        isOpen={Boolean(selectedParticipantForBreakdown)}
+        onClose={() => setSelectedParticipantForBreakdown(null)}
+        participant={selectedParticipantForBreakdown}
+        folderName={folder?.name}
+        currentUserId={currentUserId}
       />
     </div>
   );

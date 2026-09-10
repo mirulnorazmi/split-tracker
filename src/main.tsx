@@ -11,9 +11,25 @@ import LoadingScreen from '@/components/ui/LoadingScreen';
 import AuthPage from '@/features/auth/pages/AuthPage';
 import { useBreakpoint } from '@/lib/hooks/useBreakpoint';
 import { APP_NAME } from '@/lib/constants';
-import { prefetchAppData } from '@/lib/hooks/useData';
+import { prefetchAppData, refreshGlobalData } from '@/lib/hooks/useData';
 import SpotlightTour from '@/components/ui/SpotlightTour';
+import PullToRefresh from '@/components/ui/PullToRefresh';
+import PWAInstallPrompt from '@/components/ui/PWAInstallPrompt';
 import './index.css';
+
+// Register PWA Service Worker
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker
+      .register('/sw.js')
+      .then((reg) => {
+        console.log('PWA ServiceWorker registered with scope:', reg.scope);
+      })
+      .catch((err) => {
+        console.warn('PWA ServiceWorker registration failed:', err);
+      });
+  });
+}
 
 const ResetPassword = lazy(() => import('@/features/auth/pages/ResetPassword'));
 const VerifyEmail = lazy(() => import('@/features/settings/pages/VerifyEmail'));
@@ -116,9 +132,9 @@ function AppShell() {
           </div>
         </div>
 
-        <main className="flex-1 overflow-y-auto p-4 sm:p-6 lg:p-8">
+        <PullToRefresh onRefresh={refreshGlobalData} className="p-4 sm:p-6 lg:p-8">
           <AppRoutes />
-        </main>
+        </PullToRefresh>
       </div>
 
       <SpotlightTour
@@ -134,6 +150,7 @@ export default function App() {
   return (
     <Providers>
       <AppShell />
+      <PWAInstallPrompt />
     </Providers>
   );
 }
