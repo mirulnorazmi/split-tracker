@@ -6,6 +6,8 @@ export type User = {
   initials: string;
   status?: 'Pending' | 'Active';
   role?: 'Admin' | 'Standard User';
+  isPlaceholder?: boolean;
+  createdBy?: string;
 };
 
 export type Category = {

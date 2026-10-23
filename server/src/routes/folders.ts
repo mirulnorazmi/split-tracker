@@ -160,6 +160,25 @@ export default async function folderRoutes(fastify: FastifyInstance) {
 
     const folder = folderRows[0];
 
+    // Privacy guard: Only creator, expense participants in this folder, or Admin can view
+    const isFolderCreator = folder.createdBy === userId;
+    const isAdmin = role === 'Admin';
+    const isFolderParticipantCheck = await query(
+      `SELECT 1 FROM expense e
+       LEFT JOIN expense_participant ep ON ep.expense_id = e.id
+       WHERE e.folder_id = $1 AND (e.creator_id = $2 OR ep.user_id = $2)
+       LIMIT 1`,
+      [id, userId]
+    );
+    const isFolderParticipant = isFolderParticipantCheck.rows.length > 0;
+
+    if (!isFolderCreator && !isFolderParticipant && !isAdmin) {
+      return reply.status(403).send({
+        error: 'Forbidden',
+        message: 'You do not have permission to view this folder. Only group members can view this information.',
+      });
+    }
+
     const expenseFilter = role === 'Admin'
       ? 'WHERE e.folder_id = $1'
       : `WHERE e.folder_id = $1 AND (e.status = 'Confirmed' OR e.creator_id = '${userId}')`;

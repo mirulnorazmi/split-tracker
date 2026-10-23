@@ -1,9 +1,9 @@
 import React from 'react';
-import { Search } from 'lucide-react';
+import { Search, UserPlus } from 'lucide-react';
 import { cn } from '@/lib/utils/cn';
 import { AvatarBadge } from '@/components/ui/AvatarBadge';
 import { useUsers } from '@/lib/hooks/useData';
-import { User } from '@/lib/api';
+import { User, api } from '@/lib/api';
 import { formatCurrencyInput, parseCurrencyString } from '@/lib/utils/currency';
 import { CURRENCY_SYMBOL } from '@/lib/constants';
 
@@ -37,9 +37,29 @@ export function ParticipantPicker({
   numAmount,
   lockedParticipantId,
 }: ParticipantPickerProps) {
-  const { users: hookUsers } = useUsers();
+  const { users: hookUsers, refetch } = useUsers();
   const allUsers = propUsers || hookUsers;
   const [search, setSearch] = React.useState('');
+  const [isAddingPlaceholder, setIsAddingPlaceholder] = React.useState(false);
+  const [placeholderName, setPlaceholderName] = React.useState('');
+  const [isCreatingPlaceholder, setIsCreatingPlaceholder] = React.useState(false);
+
+  const handleCreatePlaceholder = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!placeholderName.trim()) return;
+    setIsCreatingPlaceholder(true);
+    try {
+      const newPh = await api.createPlaceholderUser(placeholderName.trim());
+      await refetch();
+      setPlaceholderName('');
+      setIsAddingPlaceholder(false);
+      onToggleParticipant(newPh.id);
+    } catch (err: any) {
+      alert(err?.message || 'Failed to create placeholder');
+    } finally {
+      setIsCreatingPlaceholder(false);
+    }
+  };
 
   const filteredUsers = allUsers.filter((user) => {
     const q = search.toLowerCase();
@@ -79,6 +99,47 @@ export function ParticipantPicker({
           </button>
         </div>
       </div>
+
+      <div className="flex items-center justify-between text-xs text-zinc-400 mb-2">
+        <span>Select participants or add unregistered friend</span>
+        {!isAddingPlaceholder && (
+          <button
+            type="button"
+            onClick={() => setIsAddingPlaceholder(true)}
+            className="text-xs text-sky-400 hover:text-sky-300 flex items-center gap-1 font-medium transition-colors"
+          >
+            <UserPlus className="w-3.5 h-3.5" />
+            + Add Placeholder Friend
+          </button>
+        )}
+      </div>
+
+      {isAddingPlaceholder && (
+        <form onSubmit={handleCreatePlaceholder} className="flex items-center gap-2 mb-3 bg-zinc-900 border border-zinc-700 p-2 rounded-xl">
+          <input
+            type="text"
+            autoFocus
+            placeholder="Friend's name (e.g. Farhan)..."
+            value={placeholderName}
+            onChange={(e) => setPlaceholderName(e.target.value)}
+            className="flex-1 bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-1.5 text-xs text-white placeholder:text-zinc-500 focus:outline-none focus:border-sky-500"
+          />
+          <button
+            type="submit"
+            disabled={isCreatingPlaceholder || !placeholderName.trim()}
+            className="px-3 py-1.5 text-xs font-semibold rounded-lg bg-sky-500 text-black hover:bg-sky-400 disabled:opacity-50 transition-colors"
+          >
+            {isCreatingPlaceholder ? 'Adding...' : 'Add'}
+          </button>
+          <button
+            type="button"
+            onClick={() => { setIsAddingPlaceholder(false); setPlaceholderName(''); }}
+            className="px-2 py-1.5 text-xs text-zinc-400 hover:text-white"
+          >
+            Cancel
+          </button>
+        </form>
+      )}
 
       <div className="relative mb-3">
         <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" />
@@ -126,8 +187,15 @@ export function ParticipantPicker({
                           Host (Required)
                         </span>
                       )}
+                      {user.isPlaceholder && (
+                        <span className="text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30 px-1.5 py-0.5 rounded leading-none">
+                          Placeholder
+                        </span>
+                      )}
                     </div>
-                    <div className="text-xs text-zinc-600">User ID: {user.id}</div>
+                    <div className="text-xs text-zinc-600">
+                      {user.isPlaceholder ? 'Unregistered friend' : `User ID: ${user.id}`}
+                    </div>
                   </div>
                 </button>
                 <div className="flex items-center gap-4">

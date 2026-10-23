@@ -5,8 +5,12 @@
  * Handles JWT token injection, JSON parsing, and error normalisation.
  */
 
-const isViteDev = typeof window !== 'undefined' && window.location.port === '3000';
-const API_BASE = import.meta.env.VITE_API_URL || (isViteDev ? 'http://localhost:3001' : '');
+const isViteDev =
+  typeof window !== 'undefined' &&
+  (import.meta.env.DEV || (window.location.port !== '3001' && window.location.port !== ''));
+const API_BASE =
+  import.meta.env.VITE_API_URL ||
+  (isViteDev ? `http://${typeof window !== 'undefined' ? window.location.hostname : 'localhost'}:3001` : '');
 
 class ApiError extends Error {
   status: number;
@@ -82,11 +86,13 @@ async function request<T = any>(
 export interface User {
   id: string;
   name: string;
-  email: string;
+  email?: string;
   status: string;
   role: string;
   initials: string;
   avatar?: string | null;
+  isPlaceholder?: boolean;
+  createdBy?: string;
   created_at?: string;
 }
 
@@ -144,7 +150,14 @@ export const api = {
     return request<User[]>('GET', `/users${query ? `?${query}` : ''}`);
   },
 
-  approveUser: (id: string) => request<{ id: string; status: string; message: string }>('PATCH', `/users/${id}/approve`),
+  createPlaceholderUser: (name: string) =>
+    request<User>('POST', '/users/placeholder', { name }),
+
+  getPlaceholders: () =>
+    request<Array<User & { subscriptions?: Array<{ id: string; title: string }> }>>('GET', '/users/placeholders'),
+
+  approveUser: (id: string, linkPlaceholderId?: string) =>
+    request<{ id: string; status: string; message: string }>('PATCH', `/users/${id}/approve`, linkPlaceholderId ? { linkPlaceholderId } : undefined),
 
   updateUserRole: (id: string, role: string) =>
     request<{ id: string; role: string; message: string }>('PATCH', `/users/${id}/role`, { role }),
@@ -408,9 +421,10 @@ export interface RecurringParticipant {
   discontinuedDate?: string | null;
   isActive: boolean;
   name: string;
-  email: string;
+  email?: string;
   avatar?: string | null;
   initials: string;
+  isPlaceholder?: boolean;
   totalUnpaid?: number;
   unpaidMonthsCount?: number;
 }
@@ -421,6 +435,7 @@ export interface RecurringCycleItem {
   name: string;
   avatar?: string | null;
   initials: string;
+  isPlaceholder?: boolean;
   amountDue: number;
   status: 'Unpaid' | 'Pending' | 'Paid' | 'Waived';
   paidAt?: string | null;
