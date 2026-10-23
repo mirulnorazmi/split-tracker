@@ -165,6 +165,9 @@ export const api = {
   resetUserPassword: (id: string) =>
     request<{ message: string }>('POST', `/users/${id}/password-reset`),
 
+  forgotPassword: (email: string) =>
+    request<{ message: string }>('POST', '/auth/forgot-password', { email }),
+
   resetPassword: (token: string, newPassword: string) =>
     request<{ message: string }>('POST', '/auth/reset-password', { token, newPassword }),
 
