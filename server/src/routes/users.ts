@@ -1,7 +1,7 @@
 import crypto from "crypto";
 
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
-import { query } from '../db/pool.js';
+import { query, getClient } from '../db/pool.js';
 
 interface UpdateRoleBody {
   role: 'Admin' | 'Standard User';
@@ -16,7 +16,7 @@ export default async function userRoutes(fastify: FastifyInstance) {
     const { role: userRole } = request.user as { role: string };
     const { status, role } = request.query as { status?: string; role?: string };
 
-    let sql = 'SELECT id, name, email, status, role, initials, avatar, created_at FROM "user"';
+    let sql = 'SELECT id, name, email, status, role, initials, avatar, is_placeholder AS "isPlaceholder", created_by AS "createdBy", created_at FROM "user"';
     const params: any[] = [];
     const conditions: string[] = [];
 
@@ -44,8 +44,60 @@ export default async function userRoutes(fastify: FastifyInstance) {
   });
 
   /**
+   * POST /users/placeholder
+   * Authenticated — create a placeholder (unregistered) user participant
+   */
+  fastify.post('/users/placeholder', { preHandler: [fastify.authenticate] }, async (request: FastifyRequest, reply: FastifyReply) => {
+    const { id: creatorId } = request.user as { id: string };
+    const { name } = (request.body as { name?: string }) || {};
+
+    if (!name || !name.trim()) {
+      return reply.status(400).send({ error: 'Bad Request', message: 'Name is required for placeholder participant' });
+    }
+
+    const trimmedName = name.trim();
+    const initials = trimmedName
+      .split(' ')
+      .filter(Boolean)
+      .map((n) => n[0])
+      .join('')
+      .toUpperCase()
+      .slice(0, 2) || trimmedName.slice(0, 2).toUpperCase();
+
+    const { rows } = await query(
+      `INSERT INTO "user" (name, initials, status, role, is_placeholder, created_by)
+       VALUES ($1, $2, 'Active', 'Standard User', true, $3)
+       RETURNING id, name, initials, status, role, is_placeholder AS "isPlaceholder", created_by AS "createdBy", created_at AS "createdAt"`,
+      [trimmedName, initials, creatorId]
+    );
+
+    return reply.status(201).send(rows[0]);
+  });
+
+  /**
+   * GET /users/placeholders
+   * Authenticated — list all active placeholder participants and their current subscriptions
+   */
+  fastify.get('/users/placeholders', { preHandler: [fastify.authenticate] }, async (request: FastifyRequest, reply: FastifyReply) => {
+    const { rows } = await query(
+      `SELECT u.id, u.name, u.initials, u.created_by AS "createdBy", u.created_at AS "createdAt",
+              COALESCE(
+                (SELECT json_agg(json_build_object('id', re.id, 'title', re.title))
+                 FROM recurring_participant rp
+                 JOIN recurring_expense re ON re.id = rp.recurring_expense_id
+                 WHERE rp.user_id = u.id),
+                '[]'
+              ) AS "subscriptions"
+       FROM "user" u
+       WHERE u.is_placeholder = true
+       ORDER BY u.created_at DESC`
+    );
+    return reply.send(rows);
+  });
+
+  /**
    * PATCH /users/:id/approve
-   * Admin only — approve a pending user registration
+   * Admin only — approve a pending user registration and optionally assign/link to a placeholder participant
    */
   fastify.patch('/users/:id/approve', { preHandler: [fastify.authenticate] }, async (request: FastifyRequest, reply: FastifyReply) => {
     const { role } = request.user as { role: string };
@@ -54,6 +106,98 @@ export default async function userRoutes(fastify: FastifyInstance) {
     }
 
     const { id } = request.params as { id: string };
+    const { linkPlaceholderId } = (request.body as { linkPlaceholderId?: string }) || {};
+
+    if (linkPlaceholderId) {
+      const client = await getClient();
+      try {
+        await client.query('BEGIN');
+
+        // 1. Verify pending user exists
+        const userRes = await client.query('SELECT id, name, email FROM "user" WHERE id = $1 AND status = \'Pending\'', [id]);
+        if (userRes.rows.length === 0) {
+          await client.query('ROLLBACK');
+          return reply.status(404).send({ error: 'Not Found', message: 'Pending user not found' });
+        }
+
+        // 2. Verify placeholder exists
+        const phRes = await client.query('SELECT id, name FROM "user" WHERE id = $1 AND is_placeholder = true', [linkPlaceholderId]);
+        if (phRes.rows.length === 0) {
+          await client.query('ROLLBACK');
+          return reply.status(404).send({ error: 'Not Found', message: 'Placeholder user not found' });
+        }
+        const placeholderName = phRes.rows[0].name;
+
+        // 3. Reassign recurring_participant:
+        await client.query(`
+          DELETE FROM recurring_participant
+          WHERE user_id = $1
+            AND recurring_expense_id IN (SELECT recurring_expense_id FROM recurring_participant WHERE user_id = $2)
+        `, [linkPlaceholderId, id]);
+
+        await client.query(
+          'UPDATE recurring_participant SET user_id = $1 WHERE user_id = $2',
+          [id, linkPlaceholderId]
+        );
+
+        // 4. Reassign recurring_cycle_item
+        await client.query(`
+          DELETE FROM recurring_cycle_item
+          WHERE user_id = $1
+            AND cycle_id IN (SELECT cycle_id FROM recurring_cycle_item WHERE user_id = $2)
+        `, [linkPlaceholderId, id]);
+
+        await client.query(
+          'UPDATE recurring_cycle_item SET user_id = $1 WHERE user_id = $2',
+          [id, linkPlaceholderId]
+        );
+
+        // 5. Reassign expense_participant
+        await client.query(`
+          DELETE FROM expense_participant
+          WHERE user_id = $1
+            AND expense_id IN (SELECT expense_id FROM expense_participant WHERE user_id = $2)
+        `, [linkPlaceholderId, id]);
+
+        await client.query(
+          'UPDATE expense_participant SET user_id = $1 WHERE user_id = $2',
+          [id, linkPlaceholderId]
+        );
+
+        // 6. Reassign payment payer_id
+        await client.query(
+          'UPDATE payment SET payer_id = $1 WHERE payer_id = $2',
+          [id, linkPlaceholderId]
+        );
+
+        // 7. Reassign folder created_by if any
+        await client.query(
+          'UPDATE folder SET created_by = $1 WHERE created_by = $2',
+          [id, linkPlaceholderId]
+        );
+
+        // 8. Delete the placeholder user
+        await client.query('DELETE FROM "user" WHERE id = $1', [linkPlaceholderId]);
+
+        // 9. Activate pending user
+        const updatedRes = await client.query(
+          `UPDATE "user" SET status = 'Active', updated_at = NOW() WHERE id = $1 RETURNING id, name, email, status`,
+          [id]
+        );
+
+        await client.query('COMMIT');
+        return reply.send({
+          ...updatedRes.rows[0],
+          message: `User registration approved and successfully linked to placeholder "${placeholderName}".`,
+        });
+      } catch (err) {
+        await client.query('ROLLBACK');
+        throw err;
+      } finally {
+        client.release();
+      }
+    }
+
     const { rows } = await query(
       `UPDATE "user" SET status = 'Active', updated_at = NOW() WHERE id = $1 AND status = 'Pending'
        RETURNING id, status`,

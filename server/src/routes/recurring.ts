@@ -313,7 +313,7 @@ export default async function recurringRoutes(fastify: FastifyInstance) {
    */
   fastify.get('/recurring/:id', { preHandler: [fastify.authenticate] }, async (request: FastifyRequest, reply: FastifyReply) => {
     const { id } = request.params as { id: string };
-    const { id: reqUserId } = request.user as { id: string };
+    const { id: reqUserId, role: reqUserRole } = request.user as { id: string; role: string };
 
     const { rows } = await query(
       `SELECT re.id, re.title, re.total_amount AS "totalAmount", re.billing_cycle AS "billingCycle",
@@ -334,11 +334,27 @@ export default async function recurringRoutes(fastify: FastifyInstance) {
 
     const rec = rows[0];
 
+    // Privacy guard: Only creator, participants, or Admin can view
+    const isHost = rec.creatorId === reqUserId;
+    const isAdmin = reqUserRole === 'Admin';
+    const isParticipantCheck = await query(
+      'SELECT 1 FROM recurring_participant WHERE recurring_expense_id = $1 AND user_id = $2',
+      [id, reqUserId]
+    );
+    const isParticipant = isParticipantCheck.rows.length > 0;
+
+    if (!isHost && !isParticipant && !isAdmin) {
+      return reply.status(403).send({
+        error: 'Forbidden',
+        message: 'You do not have permission to view this subscription. Only group members can view this information.',
+      });
+    }
+
     // Fetch participants with user info and their specific unpaid dues for this subscription
     const { rows: participants } = await query(
       `SELECT rp.id, rp.user_id AS "userId", rp.amount, rp.joined_date AS "joinedDate",
               rp.discontinued_date AS "discontinuedDate", rp.is_active AS "isActive",
-              u.name, u.email, u.avatar, u.initials,
+              u.name, u.email, u.avatar, u.initials, u.is_placeholder AS "isPlaceholder",
               COALESCE((
                 SELECT SUM(rci.amount_due)
                 FROM recurring_cycle_item rci
@@ -410,8 +426,6 @@ export default async function recurringRoutes(fastify: FastifyInstance) {
       [id, reqUserId]
     );
 
-    const isHost = rec.creatorId === reqUserId;
-    const isParticipant = participants.some((p) => p.userId === reqUserId);
     const userPart = participants.find((p) => p.userId === reqUserId);
     const currentMonthlyShare = rec.splitType === 'custom' && userPart && userPart.amount > 0 ? parseFloat(userPart.amount) : currentEqualShare;
 
@@ -460,13 +474,34 @@ export default async function recurringRoutes(fastify: FastifyInstance) {
    */
   fastify.get('/recurring/:id/cycles', { preHandler: [fastify.authenticate] }, async (request: FastifyRequest, reply: FastifyReply) => {
     const { id } = request.params as { id: string };
+    const { id: reqUserId, role: reqUserRole } = request.user as { id: string; role: string };
     const { year: yearQuery } = request.query as { year?: string };
     const year = parseInt(yearQuery || String(new Date().getFullYear()), 10);
 
     const { rows: expRows } = await query(
-      'SELECT start_date AS "startDate" FROM recurring_expense WHERE id = $1',
+      'SELECT start_date AS "startDate", creator_id AS "creatorId" FROM recurring_expense WHERE id = $1',
       [id]
     );
+
+    if (expRows.length === 0) {
+      return reply.status(404).send({ error: 'Not Found', message: 'Recurring expense not found' });
+    }
+
+    // Privacy guard
+    const isHost = expRows[0].creatorId === reqUserId;
+    const isAdmin = reqUserRole === 'Admin';
+    const isPartCheck = await query(
+      'SELECT 1 FROM recurring_participant WHERE recurring_expense_id = $1 AND user_id = $2',
+      [id, reqUserId]
+    );
+
+    if (!isHost && isPartCheck.rows.length === 0 && !isAdmin) {
+      return reply.status(403).send({
+        error: 'Forbidden',
+        message: 'You do not have permission to view cycles for this subscription. Only group members can view this information.',
+      });
+    }
+
     const expStartDate = expRows[0]?.startDate ? new Date(expRows[0].startDate) : new Date();
     const expStartPeriod = `${expStartDate.getFullYear()}-${String(expStartDate.getMonth() + 1).padStart(2, '0')}`;
 
@@ -495,6 +530,7 @@ export default async function recurringRoutes(fastify: FastifyInstance) {
                   'name', u.name,
                   'avatar', u.avatar,
                   'initials', u.initials,
+                  'isPlaceholder', u.is_placeholder,
                   'amountDue', rci.amount_due,
                   'status', rci.status,
                   'paidAt', rci.paid_at

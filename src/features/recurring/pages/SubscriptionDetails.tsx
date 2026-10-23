@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Calendar,
   Users,
@@ -14,6 +14,14 @@ import {
   Clock,
   Trash2,
   Edit2,
+  Share2,
+  MessageSquare,
+  Download,
+  Copy,
+  ExternalLink,
+  Sparkles,
+  CheckCircle2,
+  ShieldAlert,
 } from 'lucide-react';
 import { api, RecurringExpense, RecurringCycle } from '@/lib/api';
 import { useAuth } from '@/app/AuthContext';
@@ -68,6 +76,7 @@ function groupUnpaidCycles(cycles: UnpaidCycleType[]) {
 export default function SubscriptionDetails() {
   const { id = '' } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const { user: currentUser } = useAuth();
   const { users: allUsers } = useUsers();
 
@@ -77,6 +86,13 @@ export default function SubscriptionDetails() {
   const [selectedMonth, setSelectedMonth] = useState<number>(new Date().getMonth() + 1);
   const [isLoading, setIsLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
+  const [accessDenied, setAccessDenied] = useState(false);
+
+  // Share Dues & Analytics Modal
+  const [shareModalOpen, setShareModalOpen] = useState(false);
+  const [activeShareTab, setActiveShareTab] = useState<'whatsapp' | 'card'>('whatsapp');
+  const [copiedText, setCopiedText] = useState(false);
+  const [copiedImage, setCopiedImage] = useState(false);
 
   const { categories } = useCategories();
   const [isEditing, setIsEditing] = useState(false);
@@ -86,12 +102,33 @@ export default function SubscriptionDetails() {
   const [editBillingDay, setEditBillingDay] = useState('');
   const [editSplitType, setEditSplitType] = useState('equal');
   const [addMemberOpen, setAddMemberOpen] = useState(false);
+  const [addMemberMode, setAddMemberMode] = useState<'registered' | 'placeholder'>('registered');
+  const [placeholderFriendName, setPlaceholderFriendName] = useState('');
   const [selectedNewUserId, setSelectedNewUserId] = useState<string>('');
   const [newMemberMonth, setNewMemberMonth] = useState<number>(new Date().getMonth() + 1);
   const [newMemberYear, setNewMemberYear] = useState<number>(new Date().getFullYear());
   const [discontinueTarget, setDiscontinueTarget] = useState<{ userId: string; name: string } | null>(null);
   const [discontinueMonth, setDiscontinueMonth] = useState<number>(new Date().getMonth() + 1);
   const [discontinueYear, setDiscontinueYear] = useState<number>(new Date().getFullYear());
+
+  // Deep-link ?month=YYYY-MM handler
+  useEffect(() => {
+    const monthParam = searchParams.get('month');
+    if (monthParam) {
+      if (monthParam.includes('-')) {
+        const [y, m] = monthParam.split('-').map(Number);
+        if (y && m) {
+          setSelectedYear(y);
+          setSelectedMonth(m);
+        }
+      } else {
+        const m = parseInt(monthParam, 10);
+        if (m >= 1 && m <= 12) {
+          setSelectedMonth(m);
+        }
+      }
+    }
+  }, [searchParams]);
 
   const MONTH_NAMES = [
     'January', 'February', 'March', 'April', 'May', 'June',
@@ -114,8 +151,12 @@ export default function SubscriptionDetails() {
       setSubscription(sub);
       const cyclesData = await api.getRecurringCycles(id, selectedYear);
       setCycles(cyclesData.cycles);
-    } catch (err) {
+      setAccessDenied(false);
+    } catch (err: any) {
       console.error('Failed to load subscription details:', err);
+      if (err?.status === 403) {
+        setAccessDenied(true);
+      }
     } finally {
       setIsLoading(false);
     }
@@ -181,7 +222,6 @@ export default function SubscriptionDetails() {
     if (!discontinueTarget) return;
     setActionLoading(true);
     try {
-      // Discontinue effective at the very end of chosen month
       const endOfMonth = new Date(Date.UTC(discontinueYear, discontinueMonth, 0, 23, 59, 59, 999)).toISOString();
       await api.discontinueRecurringParticipant(id, discontinueTarget.userId, {
         discontinuedDate: endOfMonth,
@@ -212,19 +252,258 @@ export default function SubscriptionDetails() {
   };
 
   const handleAddMember = async () => {
-    if (!selectedNewUserId) return;
     setActionLoading(true);
     try {
       const joinedDate = `${newMemberYear}-${String(newMemberMonth).padStart(2, '0')}-01`;
-      await api.addRecurringParticipant(id, { userId: selectedNewUserId, joinedDate });
+      let targetUserId = selectedNewUserId;
+
+      if (addMemberMode === 'placeholder') {
+        if (!placeholderFriendName.trim()) {
+          alert('Please enter a name for the unregistered friend');
+          setActionLoading(false);
+          return;
+        }
+        const ph = await api.createPlaceholderUser(placeholderFriendName.trim());
+        targetUserId = ph.id;
+      }
+
+      if (!targetUserId) {
+        alert('Please choose or enter a participant');
+        setActionLoading(false);
+        return;
+      }
+
+      await api.addRecurringParticipant(id, { userId: targetUserId, joinedDate });
       setAddMemberOpen(false);
       setSelectedNewUserId('');
+      setPlaceholderFriendName('');
+      setAddMemberMode('registered');
       await fetchDetails();
-    } catch (err) {
+    } catch (err: any) {
       console.error('Failed to add member:', err);
+      alert(err?.message || 'Failed to add member');
     } finally {
       setActionLoading(false);
     }
+  };
+
+  const getWhatsAppMessage = () => {
+    if (!subscription) return '';
+    const monthName = MONTH_NAMES[selectedMonth - 1] || `Month ${selectedMonth}`;
+    const deepLink = `${window.location.origin}/subscriptions/${id}?month=${selectedYear}-${String(selectedMonth).padStart(2, '0')}`;
+    const items = selectedCycle?.items || [];
+    const totalDue = selectedCycle?.totalDue || subscription.totalAmount;
+    const totalCollected = selectedCycle?.totalCollected || 0;
+    const totalOutstanding = Math.max(0, totalDue - totalCollected);
+
+    const breakdownLines = items.map((it) => {
+      if (it.status === 'Paid') return `  ✅ ${it.name}: ${formatCurrency(it.amountDue)} (Paid)`;
+      if (it.status === 'Waived') return `  👑 ${it.name} (Host): Waived`;
+      if (it.isPlaceholder) return `  ⏳ ${it.name} (Unregistered): ${formatCurrency(it.amountDue)} (Due)`;
+      return `  ⏳ ${it.name}: ${formatCurrency(it.amountDue)} (Due)`;
+    }).join('\n');
+
+    return `🎵 *${subscription.title} — ${monthName} ${selectedYear} Payment Due*
+📅 Billing Day: ${subscription.billingDay}th of each month
+💰 Monthly Plan: ${formatCurrency(subscription.totalAmount)}
+
+*Member Payment Status:*
+${breakdownLines}
+
+📊 *Monthly Total:* ${formatCurrency(totalCollected)} collected / ${formatCurrency(totalOutstanding)} outstanding
+
+🔗 *Check details & submit receipt:*
+${deepLink}
+
+Thank you! 🙏`;
+  };
+
+  const generateCardCanvas = () => {
+    if (!subscription) return null;
+    const canvas = document.createElement('canvas');
+    const dpr = 2;
+    const width = 600;
+    const items = selectedCycle?.items || [];
+    const height = 380 + Math.max(1, items.length) * 44;
+    canvas.width = width * dpr;
+    canvas.height = height * dpr;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return null;
+    ctx.scale(dpr, dpr);
+
+    // Background gradient
+    const bgGrad = ctx.createLinearGradient(0, 0, 0, height);
+    bgGrad.addColorStop(0, '#0f172a');
+    bgGrad.addColorStop(1, '#020617');
+    ctx.fillStyle = bgGrad;
+    ctx.fillRect(0, 0, width, height);
+
+    // Subtle border
+    ctx.strokeStyle = '#334155';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(1, 1, width - 2, height - 2);
+
+    // Accent line
+    const accentGrad = ctx.createLinearGradient(0, 0, width, 0);
+    accentGrad.addColorStop(0, '#38bdf8');
+    accentGrad.addColorStop(0.5, '#10b981');
+    accentGrad.addColorStop(1, '#c084fc');
+    ctx.fillStyle = accentGrad;
+    ctx.fillRect(0, 0, width, 6);
+
+    // Category / Tagline
+    ctx.font = '600 11px sans-serif';
+    ctx.fillStyle = '#38bdf8';
+    ctx.fillText('SPLITTRACK • MONTHLY SUBSCRIPTION LEDGER', 36, 42);
+
+    // Title
+    ctx.font = '700 24px sans-serif';
+    ctx.fillStyle = '#ffffff';
+    ctx.fillText(subscription.title, 36, 76);
+
+    // Month Badge
+    const monthName = MONTH_NAMES[selectedMonth - 1] || `Month ${selectedMonth}`;
+    const periodText = `${monthName} ${selectedYear}`;
+    ctx.fillStyle = '#1e293b';
+    ctx.fillRect(width - 160, 48, 124, 32);
+    ctx.strokeStyle = '#475569';
+    ctx.strokeRect(width - 160, 48, 124, 32);
+    ctx.font = '600 12px sans-serif';
+    ctx.fillStyle = '#38bdf8';
+    ctx.textAlign = 'center';
+    ctx.fillText(periodText, width - 98, 69);
+    ctx.textAlign = 'left';
+
+    // Stats Box
+    ctx.fillStyle = '#111827';
+    ctx.fillRect(36, 102, width - 72, 70);
+    ctx.strokeStyle = '#1f2937';
+    ctx.strokeRect(36, 102, width - 72, 70);
+
+    // Stat 1: Total bill
+    ctx.font = '500 11px sans-serif';
+    ctx.fillStyle = '#94a3b8';
+    ctx.fillText('TOTAL PLAN', 52, 126);
+    ctx.font = '700 16px sans-serif';
+    ctx.fillStyle = '#ffffff';
+    ctx.fillText(formatCurrency(subscription.totalAmount), 52, 152);
+
+    // Stat 2: Collected
+    const totalCollected = selectedCycle?.totalCollected || 0;
+    ctx.font = '500 11px sans-serif';
+    ctx.fillStyle = '#94a3b8';
+    ctx.fillText('COLLECTED', 220, 126);
+    ctx.font = '700 16px sans-serif';
+    ctx.fillStyle = '#10b981';
+    ctx.fillText(formatCurrency(totalCollected), 220, 152);
+
+    // Stat 3: Outstanding
+    const totalDue = selectedCycle?.totalDue || subscription.totalAmount;
+    const totalOutstanding = Math.max(0, totalDue - totalCollected);
+    ctx.font = '500 11px sans-serif';
+    ctx.fillStyle = '#94a3b8';
+    ctx.fillText('OUTSTANDING', 380, 126);
+    ctx.font = '700 16px sans-serif';
+    ctx.fillStyle = totalOutstanding > 0 ? '#f87171' : '#10b981';
+    ctx.fillText(formatCurrency(totalOutstanding), 380, 152);
+
+    // Breakdown header
+    ctx.font = '700 12px sans-serif';
+    ctx.fillStyle = '#94a3b8';
+    ctx.fillText('MEMBER PAYMENT BREAKDOWN', 36, 206);
+
+    // Member rows
+    let yPos = 224;
+    items.forEach((item) => {
+      ctx.fillStyle = '#0f172a';
+      ctx.fillRect(36, yPos, width - 72, 34);
+
+      // Initials Avatar
+      ctx.fillStyle = '#334155';
+      ctx.beginPath();
+      ctx.arc(54, yPos + 17, 11, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.font = '600 10px sans-serif';
+      ctx.fillStyle = '#f8fafc';
+      ctx.textAlign = 'center';
+      ctx.fillText(item.initials || item.name.slice(0, 2).toUpperCase(), 54, yPos + 21);
+      ctx.textAlign = 'left';
+
+      // Name
+      ctx.font = '600 13px sans-serif';
+      ctx.fillStyle = '#f8fafc';
+      ctx.fillText(item.name, 74, yPos + 22);
+      if (item.isPlaceholder) {
+        ctx.font = '600 9px sans-serif';
+        ctx.fillStyle = '#f59e0b';
+        const nw = ctx.measureText(item.name).width;
+        ctx.fillText('[Placeholder]', 80 + nw, yPos + 21);
+      }
+
+      // Amount
+      ctx.font = '600 13px sans-serif';
+      ctx.fillStyle = '#f8fafc';
+      ctx.textAlign = 'right';
+      ctx.fillText(formatCurrency(item.amountDue), width - 140, yPos + 22);
+
+      // Status pill
+      const isPaid = item.status === 'Paid' || item.status === 'Waived';
+      ctx.fillStyle = isPaid ? 'rgba(16, 185, 129, 0.2)' : 'rgba(239, 68, 68, 0.2)';
+      ctx.fillRect(width - 124, yPos + 7, 72, 20);
+
+      ctx.font = '700 10px sans-serif';
+      ctx.fillStyle = isPaid ? '#34d399' : '#f87171';
+      ctx.textAlign = 'center';
+      ctx.fillText(item.status === 'Waived' ? 'Waived' : isPaid ? 'Paid' : 'Unpaid', width - 88, yPos + 21);
+      ctx.textAlign = 'left';
+
+      yPos += 40;
+    });
+
+    // Footer
+    ctx.strokeStyle = '#334155';
+    ctx.beginPath();
+    ctx.moveTo(36, yPos + 10);
+    ctx.lineTo(width - 36, yPos + 10);
+    ctx.stroke();
+
+    ctx.font = '500 11px sans-serif';
+    ctx.fillStyle = '#64748b';
+    ctx.fillText('Payable to host • Track payments live on SplitTrack', 36, yPos + 30);
+
+    return canvas;
+  };
+
+  const handleDownloadCard = () => {
+    const canvas = generateCardCanvas();
+    if (!canvas || !subscription) return;
+    const a = document.createElement('a');
+    a.href = canvas.toDataURL('image/png');
+    a.download = `${subscription.title.replace(/\s+/g, '-').toLowerCase()}-${selectedYear}-${String(selectedMonth).padStart(2, '0')}.png`;
+    a.click();
+  };
+
+  const handleCopyCard = async () => {
+    const canvas = generateCardCanvas();
+    if (!canvas) return;
+    canvas.toBlob(async (blob) => {
+      if (!blob) return;
+      try {
+        await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+        setCopiedImage(true);
+        setTimeout(() => setCopiedImage(false), 2500);
+      } catch (e) {
+        handleDownloadCard();
+      }
+    });
+  };
+
+  const handleCopyWhatsAppText = async () => {
+    const text = getWhatsAppMessage();
+    if (!text) return;
+    await navigator.clipboard.writeText(text);
+    setCopiedText(true);
+    setTimeout(() => setCopiedText(false), 2500);
   };
 
   const handleOpenEdit = () => {
@@ -256,6 +535,29 @@ export default function SubscriptionDetails() {
       setActionLoading(false);
     }
   };
+
+  if (accessDenied) {
+    return (
+      <div className="max-w-xl mx-auto py-24 text-center space-y-5 animate-in fade-in duration-300">
+        <div className="w-16 h-16 rounded-3xl bg-red-500/10 border border-red-500/20 text-red-400 flex items-center justify-center mx-auto shadow-xl shadow-red-500/5">
+          <ShieldAlert className="w-8 h-8" />
+        </div>
+        <div className="space-y-2">
+          <h2 className="text-2xl font-bold text-white tracking-tight">Private Subscription</h2>
+          <p className="text-zinc-400 text-sm max-w-md mx-auto">
+            This subscription is private. Only verified members of this subscription group can view monthly dues and payment history.
+          </p>
+        </div>
+        <button
+          onClick={() => navigate('/subscriptions')}
+          className="px-6 py-2.5 rounded-xl bg-zinc-800 text-white hover:bg-zinc-700 text-sm font-semibold transition-colors inline-flex items-center gap-2"
+        >
+          <ArrowLeft className="w-4 h-4" />
+          <span>Back to Subscriptions</span>
+        </button>
+      </div>
+    );
+  }
 
   if (isLoading || !subscription) {
     return (
@@ -296,7 +598,7 @@ export default function SubscriptionDetails() {
           </p>
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3">
           <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-4 flex items-center gap-4">
             <div className="text-right">
               <div className="text-xs text-zinc-500 font-medium">Total Monthly Bill</div>
@@ -306,6 +608,17 @@ export default function SubscriptionDetails() {
               </div>
             </div>
           </div>
+
+          {(isHost || isAdmin) && (
+            <button
+              onClick={() => setShareModalOpen(true)}
+              title="Share monthly dues & analytics via WhatsApp or Visual Card"
+              className="p-3.5 rounded-2xl border border-emerald-500/30 bg-emerald-500/15 text-emerald-400 hover:bg-emerald-500 hover:text-black transition-all cursor-pointer flex items-center gap-2 text-sm font-semibold shadow-lg shadow-emerald-500/10"
+            >
+              <Share2 className="w-4 h-4" />
+              <span className="hidden sm:inline">Share Dues &amp; Analytics</span>
+            </button>
+          )}
 
           {isAdmin && (
             <button
@@ -537,6 +850,11 @@ export default function SubscriptionDetails() {
                             Host
                           </span>
                         )}
+                        {item.isPlaceholder && (
+                          <span className="text-[10px] bg-amber-500/20 text-amber-300 border border-amber-500/30 px-2 py-0.5 rounded-full font-medium">
+                            Placeholder
+                          </span>
+                        )}
                         {item.userId === currentUser?.id && (
                           <span className="text-[10px] text-zinc-500 font-normal">(You)</span>
                         )}
@@ -652,6 +970,11 @@ export default function SubscriptionDetails() {
                       {isCreatorMember && (
                         <span className="text-[10px] bg-zinc-800 text-zinc-400 px-2 py-0.5 rounded-full font-medium">
                           Host
+                        </span>
+                      )}
+                      {p.isPlaceholder && (
+                        <span className="text-[10px] bg-amber-500/20 text-amber-300 border border-amber-500/30 px-2 py-0.5 rounded-full font-medium">
+                          Placeholder
                         </span>
                       )}
                     </div>
@@ -909,7 +1232,7 @@ export default function SubscriptionDetails() {
         </div>
       )}
       {addMemberOpen && (
-        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
+        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-200">
           <div className="bg-zinc-900 border border-zinc-800 rounded-3xl p-6 max-w-md w-full space-y-4">
             <div className="flex items-center justify-between">
               <h3 className="text-lg font-medium text-white">Add Member to {subscription.title}</h3>
@@ -924,25 +1247,66 @@ export default function SubscriptionDetails() {
               Adding a member will automatically recalculate the monthly equal share among all active members.
             </p>
 
-            <div>
-              <label className="block text-xs font-semibold text-zinc-400 uppercase tracking-wider mb-2">
-                Select User
-              </label>
-              <select
-                value={selectedNewUserId}
-                onChange={(e) => setSelectedNewUserId(e.target.value)}
-                className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 text-white focus:outline-none text-sm cursor-pointer"
+            {/* Mode selection: Registered vs Placeholder */}
+            <div className="flex bg-zinc-950 border border-zinc-800 p-1 rounded-xl">
+              <button
+                type="button"
+                onClick={() => setAddMemberMode('registered')}
+                className={`flex-1 py-1.5 text-xs font-semibold rounded-lg transition-colors ${
+                  addMemberMode === 'registered' ? 'bg-zinc-800 text-white' : 'text-zinc-400 hover:text-zinc-200'
+                }`}
               >
-                <option value="">-- Choose member --</option>
-                {allUsers
-                  .filter((u) => !activeParticipants.some((p) => p.userId === u.id))
-                  .map((u) => (
-                    <option key={u.id} value={u.id}>
-                      {u.name} ({u.email})
-                    </option>
-                  ))}
-              </select>
+                Registered Member
+              </button>
+              <button
+                type="button"
+                onClick={() => setAddMemberMode('placeholder')}
+                className={`flex-1 py-1.5 text-xs font-semibold rounded-lg transition-colors flex items-center justify-center gap-1 ${
+                  addMemberMode === 'placeholder' ? 'bg-sky-500 text-black' : 'text-zinc-400 hover:text-zinc-200'
+                }`}
+              >
+                <UserPlus className="w-3.5 h-3.5" />
+                Unregistered Friend
+              </button>
             </div>
+
+            {addMemberMode === 'registered' ? (
+              <div>
+                <label className="block text-xs font-semibold text-zinc-400 uppercase tracking-wider mb-2">
+                  Select User
+                </label>
+                <select
+                  value={selectedNewUserId}
+                  onChange={(e) => setSelectedNewUserId(e.target.value)}
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 text-white focus:outline-none text-sm cursor-pointer"
+                >
+                  <option value="">-- Choose member --</option>
+                  {allUsers
+                    .filter((u) => !activeParticipants.some((p) => p.userId === u.id))
+                    .map((u) => (
+                      <option key={u.id} value={u.id}>
+                        {u.name} {u.email ? `(${u.email})` : ''} {u.isPlaceholder ? '[Placeholder]' : ''}
+                      </option>
+                    ))}
+                </select>
+              </div>
+            ) : (
+              <div>
+                <label className="block text-xs font-semibold text-zinc-400 uppercase tracking-wider mb-2">
+                  Friend's Name (Placeholder)
+                </label>
+                <input
+                  type="text"
+                  placeholder="e.g. Farhan, Bob, Roommate..."
+                  value={placeholderFriendName}
+                  onChange={(e) => setPlaceholderFriendName(e.target.value)}
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 text-white placeholder:text-zinc-600 focus:outline-none focus:border-sky-500 text-sm"
+                />
+                <p className="text-[11px] text-amber-400/90 mt-1.5">
+                  This person will be tagged as a placeholder payer. When they register with an account later, the admin can approve and link them directly to this spot.
+                </p>
+              </div>
+            )}
 
             <div className="grid grid-cols-2 gap-4">
               <div>
@@ -975,18 +1339,218 @@ export default function SubscriptionDetails() {
             <div className="flex gap-3 pt-2">
               <button
                 onClick={() => setAddMemberOpen(false)}
-                className="flex-1 py-2.5 rounded-xl border border-zinc-700 text-zinc-300 font-medium hover:bg-zinc-800 text-sm"
+                className="flex-1 py-2.5 rounded-xl border border-zinc-700 text-zinc-300 font-medium hover:bg-zinc-800 text-sm cursor-pointer"
               >
                 Cancel
               </button>
               <button
-                disabled={!selectedNewUserId || actionLoading}
+                disabled={actionLoading || (addMemberMode === 'registered' ? !selectedNewUserId : !placeholderFriendName.trim())}
                 onClick={handleAddMember}
-                className="flex-1 py-2.5 rounded-xl bg-accent text-accent-text font-bold hover:opacity-90 text-sm disabled:opacity-50"
+                className="flex-1 py-2.5 rounded-xl bg-accent text-accent-text font-bold hover:opacity-90 text-sm disabled:opacity-50 cursor-pointer"
               >
                 {actionLoading ? 'Adding...' : 'Add Member'}
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Share Dues & Analytics Modal */}
+      {shareModalOpen && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-200">
+          <div className="bg-zinc-900 border border-zinc-800 rounded-3xl max-w-xl w-full p-6 space-y-5 shadow-2xl relative max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between border-b border-zinc-800 pb-4">
+              <div>
+                <div className="flex items-center gap-2">
+                  <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                    <Share2 className="w-5 h-5 text-emerald-400" />
+                    Share Dues &amp; Analytics
+                  </h3>
+                  <span className="text-xs px-2.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 font-medium">
+                    {MONTH_NAMES[selectedMonth - 1]} {selectedYear}
+                  </span>
+                </div>
+                <p className="text-xs text-zinc-400 mt-1">
+                  1-Click copyable reminder message or visual card with direct link for {subscription.title}.
+                </p>
+              </div>
+              <button
+                onClick={() => setShareModalOpen(false)}
+                className="p-2 text-zinc-400 hover:text-white rounded-lg hover:bg-zinc-800 transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Tab selector */}
+            <div className="flex bg-zinc-950 border border-zinc-800 p-1 rounded-xl">
+              <button
+                type="button"
+                onClick={() => setActiveShareTab('whatsapp')}
+                className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all flex items-center justify-center gap-2 ${
+                  activeShareTab === 'whatsapp' ? 'bg-emerald-500 text-black shadow-md' : 'text-zinc-400 hover:text-white'
+                }`}
+              >
+                <MessageSquare className="w-4 h-4" />
+                WhatsApp / Text Template
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveShareTab('card')}
+                className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all flex items-center justify-center gap-2 ${
+                  activeShareTab === 'card' ? 'bg-sky-500 text-black shadow-md' : 'text-zinc-400 hover:text-white'
+                }`}
+              >
+                <Sparkles className="w-4 h-4" />
+                Visual Card Image
+              </button>
+            </div>
+
+            {activeShareTab === 'whatsapp' ? (
+              <div className="space-y-4">
+                <div className="relative">
+                  <pre className="bg-zinc-950 border border-zinc-800 rounded-2xl p-4 text-xs font-mono text-zinc-300 whitespace-pre-wrap leading-relaxed select-all">
+                    {getWhatsAppMessage()}
+                  </pre>
+                </div>
+
+                <div className="flex flex-col sm:flex-row items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={handleCopyWhatsAppText}
+                    className="w-full sm:flex-1 py-3 px-4 rounded-xl font-bold text-xs bg-emerald-500 text-black hover:bg-emerald-400 transition-all flex items-center justify-center gap-2 shadow-lg shadow-emerald-500/20 cursor-pointer"
+                  >
+                    {copiedText ? (
+                      <>
+                        <CheckCircle2 className="w-4 h-4 text-black" />
+                        <span>Copied to Clipboard!</span>
+                      </>
+                    ) : (
+                      <>
+                        <Copy className="w-4 h-4" />
+                        <span>Copy Message for WhatsApp</span>
+                      </>
+                    )}
+                  </button>
+
+                  <a
+                    href={`https://api.whatsapp.com/send?text=${encodeURIComponent(getWhatsAppMessage())}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="w-full sm:w-auto py-3 px-5 rounded-xl font-semibold text-xs border border-zinc-700 text-zinc-300 hover:text-white hover:bg-zinc-800 transition-all flex items-center justify-center gap-2 cursor-pointer"
+                  >
+                    <ExternalLink className="w-4 h-4" />
+                    <span>Open WhatsApp</span>
+                  </a>
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {/* Visual Card Mock Preview */}
+                <div className="bg-slate-950 border border-slate-800 rounded-2xl p-5 space-y-4 shadow-xl">
+                  <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+                    <div>
+                      <div className="text-[10px] font-bold uppercase tracking-wider text-sky-400">SplitTrack Subscription</div>
+                      <div className="text-lg font-bold text-white">{subscription.title}</div>
+                    </div>
+                    <div className="px-3 py-1 rounded-lg bg-slate-900 border border-slate-700 text-xs font-bold text-sky-300">
+                      {MONTH_NAMES[selectedMonth - 1]} {selectedYear}
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-3 gap-2 bg-slate-900/60 p-3 rounded-xl border border-slate-800 text-center">
+                    <div>
+                      <div className="text-[10px] text-slate-400 uppercase font-semibold">Total Plan</div>
+                      <div className="text-sm font-bold text-white mt-0.5">{formatCurrency(subscription.totalAmount)}</div>
+                    </div>
+                    <div>
+                      <div className="text-[10px] text-slate-400 uppercase font-semibold">Collected</div>
+                      <div className="text-sm font-bold text-emerald-400 mt-0.5">
+                        {formatCurrency(selectedCycle?.totalCollected || 0)}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-[10px] text-slate-400 uppercase font-semibold">Due</div>
+                      <div className="text-sm font-bold text-red-400 mt-0.5">
+                        {formatCurrency(Math.max(0, (selectedCycle?.totalDue || subscription.totalAmount) - (selectedCycle?.totalCollected || 0)))}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="space-y-1.5 max-h-44 overflow-y-auto">
+                    {(selectedCycle?.items || []).map((it) => (
+                      <div key={it.userId} className="flex items-center justify-between p-2 rounded-lg bg-slate-900/40 text-xs">
+                        <div className="flex items-center gap-2">
+                          <span className="font-semibold text-white">{it.name}</span>
+                          {it.isPlaceholder && (
+                            <span className="text-[9px] px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                              Placeholder
+                            </span>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className="text-slate-300 font-mono font-medium">{formatCurrency(it.amountDue)}</span>
+                          <span className={`text-[10px] font-bold px-2 py-0.5 rounded ${
+                            it.status === 'Paid' || it.status === 'Waived'
+                              ? 'bg-emerald-500/20 text-emerald-300'
+                              : 'bg-red-500/20 text-red-300'
+                          }`}>
+                            {it.status}
+                          </span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  <div className="text-[11px] text-slate-500 pt-2 border-t border-slate-800/80 flex items-center justify-between">
+                    <span>Direct month deep-link included in export</span>
+                    <span className="text-sky-400 font-mono">Billed on {subscription.billingDay}th</span>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                  <button
+                    type="button"
+                    onClick={handleDownloadCard}
+                    className="py-2.5 px-3 rounded-xl font-bold text-xs bg-sky-500 text-black hover:bg-sky-400 transition-all flex items-center justify-center gap-1.5 shadow-md shadow-sky-500/20 cursor-pointer"
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                    <span>Download PNG</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={handleCopyCard}
+                    className="py-2.5 px-3 rounded-xl font-bold text-xs border border-zinc-700 text-zinc-300 hover:text-white hover:bg-zinc-800 transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+                  >
+                    {copiedImage ? (
+                      <>
+                        <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+                        <span className="text-emerald-400">Copied!</span>
+                      </>
+                    ) : (
+                      <>
+                        <Copy className="w-3.5 h-3.5" />
+                        <span>Copy Image</span>
+                      </>
+                    )}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const link = `${window.location.origin}/subscriptions/${id}?month=${selectedYear}-${String(selectedMonth).padStart(2, '0')}`;
+                      navigator.clipboard.writeText(link);
+                      alert('Direct link to this month copied to clipboard!');
+                    }}
+                    className="py-2.5 px-3 rounded-xl font-semibold text-xs border border-zinc-800 text-zinc-400 hover:text-white hover:bg-zinc-800 transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+                  >
+                    <ExternalLink className="w-3.5 h-3.5" />
+                    <span>Copy Link</span>
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}
