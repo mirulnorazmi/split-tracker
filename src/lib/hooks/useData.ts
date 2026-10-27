@@ -18,6 +18,19 @@ if (typeof window !== 'undefined') {
   window.addEventListener('splittrack:data-changed', () => {
     clearMemoryCache();
   });
+
+  window.addEventListener('splittrack:user-created', ((e: CustomEvent<User>) => {
+    const newUser = e.detail;
+    if (newUser && newUser.id) {
+      for (const [key, val] of memoryCache.entries()) {
+        if (key.startsWith('users:') && Array.isArray(val)) {
+          if (!val.some((u: User) => u.id === newUser.id)) {
+            memoryCache.set(key, [newUser, ...val]);
+          }
+        }
+      }
+    }
+  }) as EventListener);
 }
 
 /**
@@ -283,10 +296,19 @@ export function useUsers(params?: { status?: string; role?: string }) {
   useEffect(() => {
     fetchUsers();
     const handleRefresh = () => { fetchUsers(); };
+    const handleUserCreated = (e: Event) => {
+      const newUser = (e as CustomEvent<User>).detail;
+      if (newUser && newUser.id) {
+        setUsers((prev) => (prev.some((u) => u.id === newUser.id) ? prev : [newUser, ...prev]));
+      }
+    };
+
     window.addEventListener('splittrack:data-changed', handleRefresh);
+    window.addEventListener('splittrack:user-created', handleUserCreated);
     window.addEventListener('focus', handleRefresh);
     return () => {
       window.removeEventListener('splittrack:data-changed', handleRefresh);
+      window.removeEventListener('splittrack:user-created', handleUserCreated);
       window.removeEventListener('focus', handleRefresh);
     };
   }, [fetchUsers]);
