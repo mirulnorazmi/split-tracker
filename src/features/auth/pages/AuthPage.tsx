@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
-import { Mail, Lock, User as UserIcon, ArrowRight, Eye, EyeOff, AlertCircle, CheckCircle2, Loader2, Sparkles } from 'lucide-react';
+import { Mail, Lock, User as UserIcon, ArrowRight, Eye, EyeOff, AlertCircle, CheckCircle2, Loader2, Sparkles, KeyRound, X } from 'lucide-react';
 import { useAuth } from '@/app/AuthContext';
 import { APP_NAME } from '@/lib/constants';
 import { SonarGrid } from '@/components/ui/sonar-grid';
+import { api } from '@/lib/api';
 
 export default function AuthPage() {
   const { login, register } = useAuth();
@@ -20,9 +21,36 @@ export default function AuthPage() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
+  // Forgot password modal states
+  const [showForgotModal, setShowForgotModal] = useState(false);
+  const [forgotEmail, setForgotEmail] = useState('');
+  const [forgotLoading, setForgotLoading] = useState(false);
+  const [forgotSuccess, setForgotSuccess] = useState<string | null>(null);
+  const [forgotError, setForgotError] = useState<string | null>(null);
+
   const resetMessages = () => {
     setErrorMessage(null);
     setSuccessMessage(null);
+  };
+
+  const handleForgotPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const clean = forgotEmail.trim();
+    if (!clean) {
+      setForgotError('Please enter your email address');
+      return;
+    }
+    setForgotLoading(true);
+    setForgotError(null);
+    setForgotSuccess(null);
+    try {
+      const res = await api.forgotPassword(clean);
+      setForgotSuccess(res.message || 'If an account exists with that email, a reset link has been sent.');
+    } catch (err: any) {
+      setForgotError(err?.message || 'Failed to send reset link. Please try again.');
+    } finally {
+      setForgotLoading(false);
+    }
   };
 
   const handleSwitchMode = (newMode: 'login' | 'register') => {
@@ -207,8 +235,21 @@ export default function AuthPage() {
             <div className="space-y-1.5">
               <div className="flex items-center justify-between">
                 <label className="block text-xs font-medium text-zinc-300">Password</label>
-                {mode === 'register' && (
+                {mode === 'register' ? (
                   <span className="text-[11px] text-zinc-500">Min 8 characters</span>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setForgotEmail(email);
+                      setForgotError(null);
+                      setForgotSuccess(null);
+                      setShowForgotModal(true);
+                    }}
+                    className="text-xs text-accent hover:underline transition-colors cursor-pointer"
+                  >
+                    Forgot password?
+                  </button>
                 )}
               </div>
               <div className="relative">
@@ -307,6 +348,108 @@ export default function AuthPage() {
           )}
         </p>
       </div>
+
+      {/* Forgot Password Modal */}
+      {showForgotModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-in fade-in duration-200">
+          <div className="w-full max-w-md bg-zinc-900 border border-zinc-800 rounded-3xl p-6 sm:p-7 shadow-2xl shadow-black/90 space-y-5 relative">
+            {/* Close Button */}
+            <button
+              type="button"
+              onClick={() => setShowForgotModal(false)}
+              className="absolute top-5 right-5 text-zinc-400 hover:text-white p-1 rounded-lg hover:bg-zinc-800 transition-colors cursor-pointer"
+            >
+              <X className="w-5 h-5" />
+            </button>
+
+            {/* Header */}
+            <div className="flex items-center gap-3">
+              <div className="w-11 h-11 rounded-2xl bg-accent/15 border border-accent/30 flex items-center justify-center text-accent shrink-0">
+                <KeyRound className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-lg font-bold text-white tracking-tight">Forgot Password?</h3>
+                <p className="text-xs text-zinc-400">
+                  Enter your email to receive a password reset link
+                </p>
+              </div>
+            </div>
+
+            {forgotSuccess ? (
+              <div className="space-y-4 pt-1">
+                <div className="p-4 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 flex items-start gap-3">
+                  <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0 mt-0.5" />
+                  <div className="text-xs text-zinc-300 space-y-1">
+                    <p className="font-semibold text-emerald-300">Reset Link Sent!</p>
+                    <p className="leading-relaxed">{forgotSuccess}</p>
+                    <p className="text-zinc-400 pt-1 text-[11px]">
+                      Check your inbox (and spam folder). The link will expire in 1 hour.
+                    </p>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setShowForgotModal(false)}
+                  className="w-full py-2.5 bg-zinc-800 hover:bg-zinc-700 text-white font-semibold text-xs rounded-xl transition-all cursor-pointer"
+                >
+                  Back to Sign In
+                </button>
+              </div>
+            ) : (
+              <form onSubmit={handleForgotPassword} className="space-y-4 pt-1">
+                {forgotError && (
+                  <div className="p-3 rounded-xl bg-red-500/10 border border-red-500/30 flex items-center gap-2.5 text-xs text-red-300">
+                    <AlertCircle className="w-4 h-4 text-red-400 shrink-0" />
+                    <span>{forgotError}</span>
+                  </div>
+                )}
+
+                <div className="space-y-1.5">
+                  <label className="block text-xs font-medium text-zinc-300">Registered Email Address</label>
+                  <div className="relative">
+                    <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-zinc-500">
+                      <Mail className="w-4 h-4" />
+                    </div>
+                    <input
+                      type="email"
+                      required
+                      value={forgotEmail}
+                      onChange={(e) => setForgotEmail(e.target.value)}
+                      placeholder="name@example.com"
+                      className="w-full bg-zinc-950 border border-zinc-800 rounded-xl pl-10 pr-4 py-2.5 text-sm text-white placeholder-zinc-500 focus:outline-none focus:border-accent/60 focus:ring-1 focus:ring-accent/60 transition-all"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2.5 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowForgotModal(false)}
+                    className="flex-1 py-2.5 bg-zinc-800 hover:bg-zinc-750 text-zinc-300 hover:text-white font-semibold text-xs rounded-xl border border-zinc-700/60 transition-all cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={forgotLoading}
+                    className="flex-1 py-2.5 bg-accent text-accent-text font-bold text-xs rounded-xl hover:opacity-90 active:scale-[0.98] transition-all flex items-center justify-center gap-1.5 shadow-md shadow-accent/15 disabled:opacity-50 cursor-pointer"
+                  >
+                    {forgotLoading ? (
+                      <>
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        <span>Sending...</span>
+                      </>
+                    ) : (
+                      <span>Send Reset Link</span>
+                    )}
+                  </button>
+                </div>
+              </form>
+            )}
+          </div>
+        </div>
+      )}
     </SonarGrid>
   );
 }

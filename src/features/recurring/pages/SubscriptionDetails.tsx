@@ -784,13 +784,23 @@ Thank you! 🙏`;
         onSelectYear={(yr) => setSelectedYear(yr)}
         cycles={cycles}
         selectedMonth={selectedMonth}
-        onSelectMonth={(m) => setSelectedMonth(m)}
+        onSelectMonth={(m) => {
+          setSelectedMonth(m);
+          setTimeout(() => {
+            const el = document.getElementById('month-breakdown');
+            if (el) {
+              el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            }
+          }, 50);
+        }}
         totalCollectedYear={totalCollectedYear}
         totalDueYear={totalDueYear}
+        participants={subscription?.participants || []}
+        creatorId={subscription?.creatorId}
       />
 
       {/* Month Breakdown & Participant Payments */}
-      <div className="bg-zinc-900 border border-zinc-800/80 rounded-2xl p-6 sm:p-8">
+      <div id="month-breakdown" className="bg-zinc-900 border border-zinc-800/80 rounded-2xl p-6 sm:p-8 scroll-mt-6">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-5 border-b border-zinc-800/50 gap-4 mb-6">
           <div>
             <h3 className="text-lg font-medium text-white flex items-center gap-3">

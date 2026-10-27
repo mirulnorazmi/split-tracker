@@ -1,7 +1,9 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import bcrypt from 'bcryptjs';
+import crypto from 'crypto';
 import { query } from '../db/pool.js';
 import { config } from '../config.js';
+import { sendPasswordResetEmail } from '../utils/mailer.js';
 
 interface RegisterBody {
   name: string;
@@ -240,5 +242,55 @@ export default async function authRoutes(fastify: FastifyInstance) {
     );
 
     return reply.send({ message: 'Password has been reset successfully. You can now sign in with your new password.' });
+  });
+
+  /**
+   * POST /auth/forgot-password
+   * Public — request a password reset email.
+   * Generates a 1-hour crypto token and dispatches reset instructions via SMTP.
+   */
+  fastify.post('/auth/forgot-password', async (request: FastifyRequest, reply: FastifyReply) => {
+    const { email } = (request.body || {}) as { email?: string };
+
+    if (!email || typeof email !== 'string' || !email.trim()) {
+      return reply.status(400).send({ error: 'Bad Request', message: 'Email address is required' });
+    }
+
+    const trimmedEmail = email.trim().toLowerCase();
+
+    // Look up registered user (exclude placeholders)
+    const { rows } = await query(
+      `SELECT id, name, email FROM "user" WHERE LOWER(email) = $1 AND (is_placeholder IS NULL OR is_placeholder = false)`,
+      [trimmedEmail]
+    );
+
+    // If user exists, create token and send email
+    if (rows.length > 0) {
+      const user = rows[0];
+      const resetToken = crypto.randomUUID();
+
+      // Store token with 1-hour expiry
+      await query(
+        `UPDATE "user" SET password_reset_token = $1, password_reset_expires = NOW() + INTERVAL '1 hour', updated_at = NOW() WHERE id = $2`,
+        [resetToken, user.id]
+      );
+
+      try {
+        const origin = request.headers.origin || (request.headers.referer ? new URL(request.headers.referer).origin : '');
+        const baseUrl = origin || process.env.APP_URL || 'http://localhost:3000';
+        await sendPasswordResetEmail(user.email, resetToken, baseUrl, user.name);
+      } catch (err) {
+        request.log.error(err, 'Failed to send password reset email via SMTP');
+        return reply.status(500).send({
+          error: 'Internal Server Error',
+          message: 'Unable to send password reset email at this moment. Please try again later.',
+        });
+      }
+    }
+
+    // Always respond with a generic success message to prevent user enumeration
+    return reply.send({
+      message: 'If an account exists with that email address, a password reset link has been sent.',
+    });
   });
 }

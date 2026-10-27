@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Repeat, Calendar, Info, History, UserCheck, UserX, CheckCircle2, ArrowLeft } from 'lucide-react';
+import { Repeat, Calendar, Info, History, UserCheck, UserX, CheckCircle2, ArrowLeft, ChevronLeft, ChevronRight, Check } from 'lucide-react';
 import { useAuth } from '@/app/AuthContext';
 import { useCategories, useUsers } from '@/lib/hooks/useData';
 import { api } from '@/lib/api';
@@ -56,6 +56,9 @@ export default function NewSubscription() {
   const [splitMethod, setSplitMethod] = useState<'equal' | 'custom'>('equal');
   const [selectedParticipants, setSelectedParticipants] = useState<string[]>([]);
   const [customAmounts, setCustomAmounts] = useState<Record<string, string>>({});
+
+  // Active participant currently being configured in the stepper
+  const [activeParticipantId, setActiveParticipantId] = useState<string>('');
 
   // Subscription start date
   const [startMonth, setStartMonth] = useState(currentMonth);
@@ -278,6 +281,17 @@ export default function NewSubscription() {
 
   // Other members excluding current user
   const otherParticipants = selectedParticipants.filter((id) => id !== currentUser?.id);
+
+  // Synchronize activeParticipantId with otherParticipants
+  useEffect(() => {
+    if (otherParticipants.length > 0) {
+      if (!activeParticipantId || !otherParticipants.includes(activeParticipantId)) {
+        setActiveParticipantId(otherParticipants[0]);
+      }
+    } else {
+      setActiveParticipantId('');
+    }
+  }, [otherParticipants, activeParticipantId]);
 
   if (isReviewing) {
     const selectedCatObj = categories.find(c => c.id === selectedCategory);
@@ -547,19 +561,95 @@ export default function NewSubscription() {
 
         {/* Member Timelines & Manual Notes Setup */}
         {otherParticipants.length > 0 && (
-          <div className="space-y-3 pt-2">
-            <div className="flex items-center gap-2">
-              <History className="w-4 h-4 text-accent" />
-              <h3 className="text-sm font-medium text-zinc-200">
-                Participant History &amp; Payment Records
-              </h3>
+          <div className="space-y-4 pt-2">
+            {/* Header with counter */}
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1.5">
+              <div>
+                <div className="flex items-center gap-2">
+                  <History className="w-4 h-4 text-accent" />
+                  <h3 className="text-sm font-medium text-zinc-200">
+                    Participant History &amp; Payment Records
+                  </h3>
+                </div>
+                <p className="text-xs text-zinc-500 mt-0.5">
+                  Click each participant chip to configure their join date, active status, and payment history.
+                </p>
+              </div>
+              <div className="self-start sm:self-auto text-[11px] font-medium text-zinc-400 bg-zinc-900 border border-zinc-800 px-2.5 py-1 rounded-full flex items-center gap-1.5 shrink-0">
+                <span>Configuring:</span>
+                <span className="text-white font-semibold">
+                  {(otherParticipants.indexOf(activeParticipantId) >= 0 ? otherParticipants.indexOf(activeParticipantId) : 0) + 1} of {otherParticipants.length}
+                </span>
+              </div>
             </div>
-            <p className="text-xs text-zinc-500">
-              Configure each member’s join date, unsubscribe date, and payment status directly from your notes.
-            </p>
+
+            {/* Horizontal Participant Chips */}
+            <div className="flex items-center gap-2 overflow-x-auto pb-1.5 pt-0.5 scrollbar-thin">
+              {otherParticipants.map((userId) => {
+                const participantUser = users.find((item) => item.id === userId);
+                const participantTimeline = timelines[userId];
+                const currentIndex = otherParticipants.indexOf(activeParticipantId) >= 0 ? otherParticipants.indexOf(activeParticipantId) : 0;
+                const isSelected = userId === otherParticipants[currentIndex];
+                const isDiscontinued = participantTimeline?.isDiscontinued;
+                const paidOption = participantTimeline?.paidUntilOption ?? 'current';
+
+                return (
+                  <button
+                    key={userId}
+                    type="button"
+                    onClick={() => setActiveParticipantId(userId)}
+                    className={cn(
+                      'flex items-center gap-2 px-3 py-2 rounded-xl border text-xs font-medium whitespace-nowrap transition-all cursor-pointer shrink-0',
+                      isSelected
+                        ? 'bg-zinc-800 border-accent/70 text-white shadow-md shadow-accent/5 ring-1 ring-accent/40'
+                        : 'bg-zinc-950/70 border-zinc-800/90 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900'
+                    )}
+                  >
+                    <AvatarBadge
+                      initials={participantUser?.initials || participantUser?.name?.slice(0, 2).toUpperCase() || '?'}
+                      avatar={participantUser?.avatar}
+                      name={participantUser?.name}
+                      size="sm"
+                    />
+                    <div className="flex items-center gap-1.5">
+                      <span className={cn('font-semibold', isSelected ? 'text-white' : 'text-zinc-300')}>
+                        {participantUser?.name || userId}
+                      </span>
+                      {participantUser?.isPlaceholder && (
+                        <span className="text-[9px] font-bold uppercase tracking-wider px-1 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                          Slot
+                        </span>
+                      )}
+                    </div>
+
+                    {/* Mini status indicator */}
+                    <span
+                      className={cn(
+                        'w-2 h-2 rounded-full shrink-0 ml-0.5',
+                        isDiscontinued
+                          ? 'bg-amber-400'
+                          : paidOption === 'none'
+                          ? 'bg-red-400'
+                          : 'bg-emerald-400'
+                      )}
+                      title={
+                        isDiscontinued
+                          ? 'Discontinued'
+                          : paidOption === 'none'
+                          ? 'Unpaid'
+                          : 'Active & Paid'
+                      }
+                    />
+                  </button>
+                );
+              })}
+            </div>
 
             <div className="space-y-3">
-              {otherParticipants.map((userId) => {
+              {(() => {
+                const currentIndex = otherParticipants.indexOf(activeParticipantId) >= 0 ? otherParticipants.indexOf(activeParticipantId) : 0;
+                const currentUserId = otherParticipants[currentIndex];
+                const userId = currentUserId;
                 const u = users.find((item) => item.id === userId);
                 const timeline = timelines[userId] || {
                   joinedMonth: startMonth,
@@ -856,9 +946,38 @@ export default function NewSubscription() {
                         </div>
                       </div>
                     </div>
+
+                    {/* Stepper Navigation Footer */}
+                    <div className="flex items-center justify-between pt-3 border-t border-zinc-800/60">
+                      <button
+                        type="button"
+                        disabled={currentIndex === 0}
+                        onClick={() => setActiveParticipantId(otherParticipants[currentIndex - 1])}
+                        className="px-3 py-2 rounded-xl border border-zinc-800 text-xs font-medium text-zinc-400 hover:text-white hover:bg-zinc-900 disabled:opacity-30 disabled:pointer-events-none transition-all flex items-center gap-1.5 cursor-pointer"
+                      >
+                        <ChevronLeft className="w-4 h-4" />
+                        Previous Member
+                      </button>
+
+                      {currentIndex < otherParticipants.length - 1 ? (
+                        <button
+                          type="button"
+                          onClick={() => setActiveParticipantId(otherParticipants[currentIndex + 1])}
+                          className="px-4 py-2 rounded-xl bg-accent text-accent-text text-xs font-bold hover:opacity-90 active:scale-[0.98] transition-all flex items-center gap-1.5 shadow-sm shadow-accent/10 cursor-pointer"
+                        >
+                          <span>Next: {users.find((item) => item.id === otherParticipants[currentIndex + 1])?.name || 'Member'}</span>
+                          <ChevronRight className="w-4 h-4" />
+                        </button>
+                      ) : (
+                        <div className="flex items-center gap-1.5 text-xs text-emerald-400 font-semibold px-3 py-1.5 bg-emerald-500/10 border border-emerald-500/30 rounded-xl">
+                          <Check className="w-3.5 h-3.5" />
+                          All members configured
+                        </div>
+                      )}
+                    </div>
                   </div>
                 );
-              })}
+              })()}
             </div>
           </div>
         )}
