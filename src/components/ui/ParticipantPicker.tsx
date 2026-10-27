@@ -44,12 +44,16 @@ export function ParticipantPicker({
   const [placeholderName, setPlaceholderName] = React.useState('');
   const [isCreatingPlaceholder, setIsCreatingPlaceholder] = React.useState(false);
 
-  const handleCreatePlaceholder = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!placeholderName.trim()) return;
+  const handleCreatePlaceholder = async (e?: React.SyntheticEvent) => {
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+    if (!placeholderName.trim() || isCreatingPlaceholder) return;
     setIsCreatingPlaceholder(true);
     try {
       const newPh = await api.createPlaceholderUser(placeholderName.trim());
+      window.dispatchEvent(new Event('splittrack:data-changed'));
       await refetch();
       setPlaceholderName('');
       setIsAddingPlaceholder(false);
@@ -115,30 +119,47 @@ export function ParticipantPicker({
       </div>
 
       {isAddingPlaceholder && (
-        <form onSubmit={handleCreatePlaceholder} className="flex items-center gap-2 mb-3 bg-zinc-900 border border-zinc-700 p-2 rounded-xl">
+        <div className="flex items-center gap-2 mb-3 bg-zinc-900 border border-zinc-700 p-2 rounded-xl">
           <input
             type="text"
             autoFocus
             placeholder="Friend's name (e.g. Farhan)..."
             value={placeholderName}
             onChange={(e) => setPlaceholderName(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                e.stopPropagation();
+                handleCreatePlaceholder(e);
+              }
+            }}
             className="flex-1 bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-1.5 text-xs text-white placeholder:text-zinc-500 focus:outline-none focus:border-sky-500"
           />
           <button
-            type="submit"
+            type="button"
             disabled={isCreatingPlaceholder || !placeholderName.trim()}
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              handleCreatePlaceholder(e);
+            }}
             className="px-3 py-1.5 text-xs font-semibold rounded-lg bg-sky-500 text-black hover:bg-sky-400 disabled:opacity-50 transition-colors"
           >
             {isCreatingPlaceholder ? 'Adding...' : 'Add'}
           </button>
           <button
             type="button"
-            onClick={() => { setIsAddingPlaceholder(false); setPlaceholderName(''); }}
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              setIsAddingPlaceholder(false);
+              setPlaceholderName('');
+            }}
             className="px-2 py-1.5 text-xs text-zinc-400 hover:text-white"
           >
             Cancel
           </button>
-        </form>
+        </div>
       )}
 
       <div className="relative mb-3">

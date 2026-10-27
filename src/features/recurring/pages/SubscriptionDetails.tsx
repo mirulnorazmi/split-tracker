@@ -265,6 +265,7 @@ export default function SubscriptionDetails() {
         }
         const ph = await api.createPlaceholderUser(placeholderFriendName.trim());
         targetUserId = ph.id;
+        window.dispatchEvent(new Event('splittrack:data-changed'));
       }
 
       if (!targetUserId) {
@@ -274,6 +275,7 @@ export default function SubscriptionDetails() {
       }
 
       await api.addRecurringParticipant(id, { userId: targetUserId, joinedDate });
+      window.dispatchEvent(new Event('splittrack:data-changed'));
       setAddMemberOpen(false);
       setSelectedNewUserId('');
       setPlaceholderFriendName('');
@@ -1247,6 +1249,7 @@ Thank you! 🙏`;
             <div className="flex items-center justify-between">
               <h3 className="text-lg font-medium text-white">Add Member to {subscription.title}</h3>
               <button
+                type="button"
                 onClick={() => setAddMemberOpen(false)}
                 className="text-zinc-400 hover:text-white"
               >
@@ -1310,6 +1313,15 @@ Thank you! 🙏`;
                   placeholder="e.g. Farhan, Bob, Roommate..."
                   value={placeholderFriendName}
                   onChange={(e) => setPlaceholderFriendName(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      if (placeholderFriendName.trim() && !actionLoading) {
+                        handleAddMember();
+                      }
+                    }
+                  }}
                   className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 text-white placeholder:text-zinc-600 focus:outline-none focus:border-sky-500 text-sm"
                 />
                 <p className="text-[11px] text-amber-400/90 mt-1.5">
@@ -1348,12 +1360,14 @@ Thank you! 🙏`;
 
             <div className="flex gap-3 pt-2">
               <button
+                type="button"
                 onClick={() => setAddMemberOpen(false)}
                 className="flex-1 py-2.5 rounded-xl border border-zinc-700 text-zinc-300 font-medium hover:bg-zinc-800 text-sm cursor-pointer"
               >
                 Cancel
               </button>
               <button
+                type="button"
                 disabled={actionLoading || (addMemberMode === 'registered' ? !selectedNewUserId : !placeholderFriendName.trim())}
                 onClick={handleAddMember}
                 className="flex-1 py-2.5 rounded-xl bg-accent text-accent-text font-bold hover:opacity-90 text-sm disabled:opacity-50 cursor-pointer"
