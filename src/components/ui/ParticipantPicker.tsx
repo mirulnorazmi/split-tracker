@@ -12,7 +12,7 @@ type SplitMethod = 'equal' | 'custom';
 type ParticipantPickerProps = {
   users?: User[];
   selectedParticipants: string[];
-  onToggleParticipant: (id: string) => void;
+  onToggleParticipant: (id: string, newUser?: User) => void;
   splitMethod: SplitMethod;
   onChangeSplitMethod: (method: SplitMethod) => void;
   customAmounts: Record<string, string>;
@@ -38,7 +38,16 @@ export function ParticipantPicker({
   lockedParticipantId,
 }: ParticipantPickerProps) {
   const { users: hookUsers, refetch } = useUsers();
-  const allUsers = propUsers || hookUsers;
+  const [localExtraUsers, setLocalExtraUsers] = React.useState<User[]>([]);
+
+  const allUsers = React.useMemo(() => {
+    const base = propUsers || hookUsers;
+    const map = new Map<string, User>();
+    base.forEach((u) => map.set(u.id, u));
+    localExtraUsers.forEach((u) => map.set(u.id, u));
+    return Array.from(map.values());
+  }, [propUsers, hookUsers, localExtraUsers]);
+
   const [search, setSearch] = React.useState('');
   const [isAddingPlaceholder, setIsAddingPlaceholder] = React.useState(false);
   const [placeholderName, setPlaceholderName] = React.useState('');
@@ -49,15 +58,17 @@ export function ParticipantPicker({
       e.preventDefault();
       e.stopPropagation();
     }
-    if (!placeholderName.trim() || isCreatingPlaceholder) return;
+    const cleanName = placeholderName.trim();
+    if (!cleanName || isCreatingPlaceholder) return;
     setIsCreatingPlaceholder(true);
     try {
-      const newPh = await api.createPlaceholderUser(placeholderName.trim());
+      const newPh = await api.createPlaceholderUser(cleanName);
+      setLocalExtraUsers((prev) => (prev.some((u) => u.id === newPh.id) ? prev : [newPh, ...prev]));
       window.dispatchEvent(new Event('splittrack:data-changed'));
       await refetch();
       setPlaceholderName('');
       setIsAddingPlaceholder(false);
-      onToggleParticipant(newPh.id);
+      onToggleParticipant(newPh.id, newPh);
     } catch (err: any) {
       alert(err?.message || 'Failed to create placeholder');
     } finally {
@@ -215,7 +226,7 @@ export function ParticipantPicker({
                       )}
                     </div>
                     <div className="text-xs text-zinc-600">
-                      {user.isPlaceholder ? 'Unregistered friend' : `User ID: ${user.id}`}
+                      {user.isPlaceholder ? 'Unregistered friend' : (user.email || 'Registered member')}
                     </div>
                   </div>
                 </button>

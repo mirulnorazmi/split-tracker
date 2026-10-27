@@ -1,9 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Repeat, Calendar, Info, History, UserCheck, UserX, CheckCircle2, ArrowLeft, ChevronLeft, ChevronRight, Check } from 'lucide-react';
 import { useAuth } from '@/app/AuthContext';
 import { useCategories, useUsers } from '@/lib/hooks/useData';
-import { api } from '@/lib/api';
+import { api, User } from '@/lib/api';
 import { ParticipantPicker, BackButton } from '@/components';
 import { formatCurrency } from '@/lib/utils/currency';
 import { AvatarBadge } from '@/components/ui/AvatarBadge';
@@ -48,6 +48,16 @@ export default function NewSubscription() {
   const { user: currentUser } = useAuth();
   const { categories } = useCategories();
   const { users } = useUsers();
+  const [extraUsers, setExtraUsers] = useState<User[]>([]);
+
+  const allUsersMap = useMemo(() => {
+    const map = new Map<string, User>();
+    users.forEach((u) => map.set(u.id, u));
+    extraUsers.forEach((u) => map.set(u.id, u));
+    return map;
+  }, [users, extraUsers]);
+
+  const allUsersList = useMemo(() => Array.from(allUsersMap.values()), [allUsersMap]);
 
   const [title, setTitle] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('');
@@ -146,9 +156,13 @@ export default function NewSubscription() {
     }
   };
 
-  const toggleParticipant = (userId: string) => {
+  const toggleParticipant = (userId: string, newUser?: User) => {
     // Creator cannot be removed
     if (userId === currentUser?.id) return;
+
+    if (newUser) {
+      setExtraUsers((prev) => (prev.some((u) => u.id === newUser.id) ? prev : [newUser, ...prev]));
+    }
 
     setSelectedParticipants((prev) => {
       if (prev.includes(userId)) {
@@ -337,7 +351,7 @@ export default function NewSubscription() {
             <h2 className="text-sm font-semibold text-zinc-500 uppercase tracking-wider mb-4">Participants</h2>
             <div className="space-y-3">
               {selectedParticipants.map(userId => {
-                const u = users.find(user => user.id === userId);
+                const u = allUsersMap.get(userId);
                 const isHost = userId === currentUser?.id;
                 const timeline = timelines[userId] || {
                   joinedMonth: startMonth,
@@ -346,14 +360,15 @@ export default function NewSubscription() {
                   paidUntilOption: 'none'
                 };
                 const share = splitMethod === 'equal' ? equalSplitAmount : parseFloat(customAmounts[userId] || '0') || 0;
+                const displayName = u?.name || 'Participant';
 
                 return (
                   <div key={userId} className="flex justify-between items-center bg-zinc-950 border border-zinc-800/50 p-4 rounded-xl">
                     <div className="flex items-center gap-3">
-                      <AvatarBadge initials={u?.initials} avatar={u?.avatar} name={u?.name} size="sm" />
+                      <AvatarBadge initials={u?.initials || displayName.slice(0, 2).toUpperCase()} avatar={u?.avatar} name={displayName} size="sm" />
                       <div>
                         <div className="text-white font-medium text-sm">
-                          {u?.name || userId} {isHost && <span className="text-zinc-500 font-normal ml-1">(Host)</span>}
+                          {displayName} {isHost && <span className="text-zinc-500 font-normal ml-1">(Host)</span>}
                         </div>
                         <div className="text-[10px] text-zinc-500">
                           Joined {MONTH_OPTIONS.find(m => m.value === (isHost ? startMonth : String(timeline.joinedMonth).padStart(2, '0')))?.label} {isHost ? startYear : timeline.joinedYear}
@@ -546,7 +561,7 @@ export default function NewSubscription() {
           </div>
 
           <ParticipantPicker
-            users={users}
+            users={allUsersList}
             selectedParticipants={selectedParticipants}
             onToggleParticipant={toggleParticipant}
             splitMethod={splitMethod}
@@ -586,12 +601,13 @@ export default function NewSubscription() {
             {/* Horizontal Participant Chips */}
             <div className="flex items-center gap-2 overflow-x-auto pb-1.5 pt-0.5 scrollbar-thin">
               {otherParticipants.map((userId) => {
-                const participantUser = users.find((item) => item.id === userId);
+                const participantUser = allUsersMap.get(userId);
                 const participantTimeline = timelines[userId];
                 const currentIndex = otherParticipants.indexOf(activeParticipantId) >= 0 ? otherParticipants.indexOf(activeParticipantId) : 0;
                 const isSelected = userId === otherParticipants[currentIndex];
                 const isDiscontinued = participantTimeline?.isDiscontinued;
                 const paidOption = participantTimeline?.paidUntilOption ?? 'current';
+                const participantName = participantUser?.name || 'Participant';
 
                 return (
                   <button
@@ -606,14 +622,14 @@ export default function NewSubscription() {
                     )}
                   >
                     <AvatarBadge
-                      initials={participantUser?.initials || participantUser?.name?.slice(0, 2).toUpperCase() || '?'}
+                      initials={participantUser?.initials || participantName.slice(0, 2).toUpperCase()}
                       avatar={participantUser?.avatar}
-                      name={participantUser?.name}
+                      name={participantName}
                       size="sm"
                     />
                     <div className="flex items-center gap-1.5">
                       <span className={cn('font-semibold', isSelected ? 'text-white' : 'text-zinc-300')}>
-                        {participantUser?.name || userId}
+                        {participantName}
                       </span>
                       {participantUser?.isPlaceholder && (
                         <span className="text-[9px] font-bold uppercase tracking-wider px-1 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30">
@@ -650,7 +666,8 @@ export default function NewSubscription() {
                 const currentIndex = otherParticipants.indexOf(activeParticipantId) >= 0 ? otherParticipants.indexOf(activeParticipantId) : 0;
                 const currentUserId = otherParticipants[currentIndex];
                 const userId = currentUserId;
-                const u = users.find((item) => item.id === userId);
+                const u = allUsersMap.get(userId);
+                const userName = u?.name || 'Participant';
                 const timeline = timelines[userId] || {
                   joinedMonth: startMonth,
                   joinedYear: startYear,
@@ -670,14 +687,14 @@ export default function NewSubscription() {
                     {/* Header: User Info */}
                     <div className="flex items-center gap-3">
                       <AvatarBadge
-                        initials={u?.initials}
+                        initials={u?.initials || userName.slice(0, 2).toUpperCase()}
                         avatar={u?.avatar}
-                        name={u?.name}
+                        name={userName}
                         size="md"
                       />
                       <div>
-                        <div className="text-base font-semibold text-white">{u?.name || userId}</div>
-                        <div className="text-xs text-zinc-400">{u?.email}</div>
+                        <div className="text-base font-semibold text-white">{userName}</div>
+                        <div className="text-xs text-zinc-400">{u?.email || (u?.isPlaceholder ? 'Unregistered friend' : '')}</div>
                       </div>
                     </div>
 
@@ -965,7 +982,7 @@ export default function NewSubscription() {
                           onClick={() => setActiveParticipantId(otherParticipants[currentIndex + 1])}
                           className="px-4 py-2 rounded-xl bg-accent text-accent-text text-xs font-bold hover:opacity-90 active:scale-[0.98] transition-all flex items-center gap-1.5 shadow-sm shadow-accent/10 cursor-pointer"
                         >
-                          <span>Next: {users.find((item) => item.id === otherParticipants[currentIndex + 1])?.name || 'Member'}</span>
+                          <span>Next: {allUsersMap.get(otherParticipants[currentIndex + 1])?.name || 'Member'}</span>
                           <ChevronRight className="w-4 h-4" />
                         </button>
                       ) : (

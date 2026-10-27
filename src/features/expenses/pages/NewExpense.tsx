@@ -3,7 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { ArrowLeft, Folder as FolderIcon, Calendar, Shield } from 'lucide-react';
 import { useAuth } from '@/app/AuthContext';
 import { useCategories, useUsers } from '@/lib/hooks/useData';
-import { api, Folder } from '@/lib/api';
+import { api, Folder, User } from '@/lib/api';
 import { useExpenseForm } from '@/features/expenses/hooks/useExpenseForm';
 import { ParticipantPicker, SuccessScreen, BackButton } from '@/components';
 import { formatDate } from '@/lib/utils/formatDate';
@@ -18,6 +18,13 @@ export default function NewExpense() {
   const { user: currentUser } = useAuth();
   const { categories } = useCategories();
   const { users } = useUsers();
+  const [extraUsers, setExtraUsers] = useState<User[]>([]);
+  const allExpenseUsers = React.useMemo(() => {
+    const map = new Map<string, User>();
+    users.forEach((u) => map.set(u.id, u));
+    extraUsers.forEach((u) => map.set(u.id, u));
+    return Array.from(map.values());
+  }, [users, extraUsers]);
 
   const [step, setStep] = useState<Step>('form');
   const [countdown, setCountdown] = useState(5);
@@ -159,7 +166,7 @@ export default function NewExpense() {
                 Participant Split ({form.splitMethod === 'equal' ? 'Equal' : 'Custom'})
               </h3>
               {form.selectedParticipants.map((userId) => {
-                const pUser = users.find((u) => u.id === userId);
+                const pUser = allExpenseUsers.find((u) => u.id === userId);
                 const shareAmount = form.splitMethod === 'equal'
                   ? form.equalSplitAmount
                   : parseFloat(form.customAmounts[userId]?.replace(/,/g, '') || '0') || 0;
@@ -170,10 +177,10 @@ export default function NewExpense() {
                         {pUser?.avatar ? (
                           <img src={pUser.avatar} alt={pUser.name} className="w-full h-full object-cover" />
                         ) : (
-                          pUser?.initials || '?'
+                          pUser?.initials || pUser?.name?.slice(0, 2).toUpperCase() || '?'
                         )}
                       </div>
-                      <div className="text-white font-medium">{pUser?.name || userId} {userId === currentUser?.id && '(You)'}</div>
+                      <div className="text-white font-medium">{pUser?.name || 'Participant'} {userId === currentUser?.id && '(You)'}</div>
                     </div>
                     <div className="text-right text-zinc-300">RM {shareAmount.toFixed(2)}</div>
                   </div>
@@ -300,9 +307,14 @@ export default function NewExpense() {
         </div>
 
         <ParticipantPicker
-          users={users}
+          users={allExpenseUsers}
           selectedParticipants={form.selectedParticipants}
-          onToggleParticipant={form.toggleParticipant}
+          onToggleParticipant={(id, newUser) => {
+            if (newUser) {
+              setExtraUsers((prev) => (prev.some((u) => u.id === newUser.id) ? prev : [newUser, ...prev]));
+            }
+            form.toggleParticipant(id);
+          }}
           splitMethod={form.splitMethod}
           onChangeSplitMethod={form.setSplitMethod}
           customAmounts={form.customAmounts}

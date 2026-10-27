@@ -150,8 +150,13 @@ export const api = {
     return request<User[]>('GET', `/users${query ? `?${query}` : ''}`);
   },
 
-  createPlaceholderUser: (name: string) =>
-    request<User>('POST', '/users/placeholder', { name }),
+  createPlaceholderUser: async (name: string) => {
+    const res = await request<User>('POST', '/users/placeholder', { name });
+    if (typeof window !== 'undefined' && res) {
+      window.dispatchEvent(new CustomEvent('splittrack:user-created', { detail: res }));
+    }
+    return res;
+  },
 
   getPlaceholders: () =>
     request<Array<User & { subscriptions?: Array<{ id: string; title: string }> }>>('GET', '/users/placeholders'),

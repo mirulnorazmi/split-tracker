@@ -312,7 +312,7 @@ export default function ExpenseDetails({ expenseId: propExpenseId, onBack }: Exp
                         )}
                       </div>
                       <div className="text-white font-medium">
-                        {user?.name || userId} {userId === currentUserId && '(You)'}
+                        {user?.name || 'Participant'} {userId === currentUserId && '(You)'}
                       </div>
                     </div>
                     <div className="text-right text-zinc-300">RM {shareAmount.toFixed(2)}</div>
